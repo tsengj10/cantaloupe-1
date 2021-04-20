@@ -16,7 +16,7 @@ public final class ImageReaderFactory {
 
     private static final Set<Format> SUPPORTED_FORMATS =
             Collections.unmodifiableSet(EnumSet.of(Format.BMP,
-                    Format.GIF, Format.JPG, Format.PNG, Format.TIF, Format.RAFT));
+                    Format.GIF, Format.JPG, Format.PNG, Format.TIF, Format.RAFT, Format.CANTALOUPE));
 
     /**
      * @return Map of available output formats for all known source formats,
@@ -40,6 +40,8 @@ public final class ImageReaderFactory {
                 return new TIFFImageReader();
             case RAFT:
                 return new RAFTImageReader();
+            case CANTALOUPE:
+                return new DelegatingImageReader();
             default:
                 throw new IllegalArgumentException("Unsupported format: " + format);
         }

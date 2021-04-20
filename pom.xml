@@ -171,7 +171,7 @@
             <version>2.3.0</version>
         </dependency>
         <!-- Enhanced ImageIO TIFF plugin supporting BigTIFF:
-         https://github.com/geosolutions-it/imageio-ext/ -->
+        https://github.com/geosolutions-it/imageio-ext/ -->
         <dependency>
             <groupId>it.geosolutions.imageio-ext</groupId>
             <artifactId>imageio-ext-tiff</artifactId>

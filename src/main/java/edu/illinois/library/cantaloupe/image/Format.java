@@ -169,6 +169,14 @@ public enum Format {
             16,
             false),
 
+    CANTALOUPE("CANTALOUPE",
+            ImageType.RASTER,
+            Arrays.asList("image/cantaloupe"),
+            Arrays.asList("canlaloupe", "cantaloupe"),
+            Type.IMAGE,
+            16,
+            false),
+
     /**
      * WebM video format.
      */
