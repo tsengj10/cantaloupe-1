@@ -172,7 +172,7 @@ public enum Format {
     CANTALOUPE("CANTALOUPE",
             ImageType.RASTER,
             Arrays.asList("image/cantaloupe"),
-            Arrays.asList("canlaloupe", "cantaloupe"),
+            Arrays.asList("cantaloupe"),
             Type.IMAGE,
             16,
             false),
