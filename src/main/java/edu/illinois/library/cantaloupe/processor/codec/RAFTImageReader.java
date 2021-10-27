@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
 import javax.imageio.ImageReadParam;
 import javax.imageio.stream.ImageInputStream;
 import org.lsst.fits.imageio.CameraImageReader;
-import org.lsst.fits.imageio.FITSImageReadParam;
+import org.lsst.fits.imageio.CameraImageReadParam;
 
 final class RAFTImageReader extends AbstractIIOImageReader
         implements ImageReader {
@@ -152,11 +152,15 @@ final class RAFTImageReader extends AbstractIIOImageReader
     }
 
     private ImageReadParam getDefaultReadParam(Map<String, Object> opts) {
-        FITSImageReadParam readParam = ((CameraImageReader) iioReader).getDefaultReadParam();
+        CameraImageReadParam readParam = ((CameraImageReader) iioReader).getDefaultReadParam();
         this.options.putAll(opts);
         Object biasCorrection = this.options.get("biasCorrection");
         if (biasCorrection != null) {
             readParam.setBiasCorrection(biasCorrection.toString());
+        }
+        Object scale = this.options.get("scale");
+        if (scale != null) {
+            readParam.setScale("Global".equalsIgnoreCase(scale.toString()) ? CameraImageReadParam.Scale.GLOBAL : CameraImageReadParam.Scale.AMPLIFIER);
         }
         Object colorMap = this.options.get("colorMap");
         if (colorMap != null) {
