@@ -8,37 +8,50 @@ import edu.illinois.library.cantaloupe.operation.CropByPercent;
 import edu.illinois.library.cantaloupe.operation.CropByPixels;
 import edu.illinois.library.cantaloupe.operation.CropToSquare;
 import edu.illinois.library.cantaloupe.operation.OperationList;
-import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
 import edu.illinois.library.cantaloupe.operation.Rotate;
 import edu.illinois.library.cantaloupe.operation.Scale;
+import edu.illinois.library.cantaloupe.operation.ScaleByPercent;
+import edu.illinois.library.cantaloupe.operation.ScaleByPixels;
 import edu.illinois.library.cantaloupe.operation.Sharpen;
 import edu.illinois.library.cantaloupe.operation.Transpose;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReader;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReaderFactory;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import javax.media.jai.Interpolation;
 import javax.media.jai.PlanarImage;
 import javax.media.jai.RenderedOp;
+import java.awt.color.ColorSpace;
 import java.awt.image.BufferedImage;
 import java.awt.image.RenderedImage;
 
 import static edu.illinois.library.cantaloupe.test.Assert.ImageAssert.*;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 @SuppressWarnings("deprecation")
-public class JAIUtilTest extends BaseTest {
+class JAIUtilTest extends BaseTest {
 
     private static final double DELTA = 0.00000001;
     private static final String IMAGE = "png-rgb-64x56x8.png";
 
+    /* convertColor(RenderedOp, ColorSpace) */
+
+    @Test
+    void convertColor() throws Exception {
+        RenderedOp inImage = readImage(IMAGE);
+        ColorSpace colorSpace = ColorSpace.getInstance(ColorSpace.CS_LINEAR_RGB);
+        assertNotEquals(colorSpace, inImage.getColorModel().getColorSpace());
+        RenderedOp outImage = JAIUtil.convertColor(inImage, colorSpace);
+        assertEquals(colorSpace, outImage.getColorModel().getColorSpace());
+    }
+
     /* cropImage(RenderedOp, Crop) */
 
     @Test
-    public void cropImageWithCropByPixels() throws Exception {
+    void cropImageWithCropByPixels() throws Exception {
         RenderedOp inImage = readImage(IMAGE);
 
         CropByPixels crop = new CropByPixels(0, 0, 50, 50);
@@ -50,7 +63,7 @@ public class JAIUtilTest extends BaseTest {
     }
 
     @Test
-    public void cropImageWithCropByPercent() throws Exception {
+    void cropImageWithCropByPercent() throws Exception {
         RenderedOp inImage = readImage(IMAGE);
 
         CropByPercent crop = new CropByPercent();
@@ -64,7 +77,7 @@ public class JAIUtilTest extends BaseTest {
     }
 
     @Test
-    public void cropImageWithCropToSquare() throws Exception {
+    void cropImageWithCropToSquare() throws Exception {
         RenderedOp inImage = readImage(IMAGE);
 
         Crop crop = new CropToSquare();
@@ -76,7 +89,7 @@ public class JAIUtilTest extends BaseTest {
     /* cropImage(RenderedOp, Crop, ReductionFactor) */
 
     @Test
-    public void cropImageWithReductionFactorWithCropByPixels() throws Exception {
+    void cropImageWithReductionFactorWithCropByPixels() throws Exception {
         RenderedOp inImage = readImage(IMAGE);
         final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
 
@@ -88,7 +101,7 @@ public class JAIUtilTest extends BaseTest {
     }
 
     @Test
-    public void cropImageWithReductionFactorWithCropByPercent() throws Exception {
+    void cropImageWithReductionFactorWithCropByPercent() throws Exception {
         RenderedOp inImage = readImage(IMAGE);
 
         ReductionFactor rf = new ReductionFactor(1);
@@ -104,7 +117,7 @@ public class JAIUtilTest extends BaseTest {
     }
 
     @Test
-    public void cropImageWithReductionFactorWithCropToSquare() throws Exception {
+    void cropImageWithReductionFactorWithCropToSquare() throws Exception {
         RenderedOp inImage = readImage(IMAGE);
 
         Crop crop = new CropToSquare();
@@ -116,7 +129,7 @@ public class JAIUtilTest extends BaseTest {
     /* getAsRenderedOp() */
 
     @Test
-    public void getAsRenderedOp() throws Exception {
+    void getAsRenderedOp() throws Exception {
         RenderedImage image = readImage(IMAGE);
         PlanarImage planarImage = PlanarImage.wrapRenderedImage(image);
         RenderedOp renderedOp = JAIUtil.getAsRenderedOp(planarImage);
@@ -127,7 +140,7 @@ public class JAIUtilTest extends BaseTest {
     /* reduceTo8Bits() */
 
     @Test
-    public void reduceTo8BitsWith16BitImage() throws Exception {
+    void reduceTo8BitsWith16BitImage() throws Exception {
         RenderedOp inImage = readImage("png-rgb-64x56x16.png");
         assertEquals(16, inImage.getColorModel().getComponentSize(0));
 
@@ -136,7 +149,7 @@ public class JAIUtilTest extends BaseTest {
     }
 
     @Test
-    public void reduceTo8BitsWith8BitImage() throws Exception {
+    void reduceTo8BitsWith8BitImage() throws Exception {
         RenderedOp inImage = readImage("png-rgb-64x56x8.png");
         assertEquals(8, inImage.getColorModel().getComponentSize(0));
 
@@ -147,14 +160,14 @@ public class JAIUtilTest extends BaseTest {
     /* rescalePixels() */
 
     @Test
-    public void rescalePixels() {
+    void rescalePixels() {
         // TODO: write this
     }
 
     /* rotateImage() */
 
     @Test
-    public void rotateImage() throws Exception {
+    void rotateImage() throws Exception {
         RenderedOp inImage = readImage(IMAGE);
 
         // test with no-op rotate
@@ -184,27 +197,19 @@ public class JAIUtilTest extends BaseTest {
     /* scaleImage() */
 
     @Test
-    public void scaleImage() throws Exception {
+    void scaleImageWithAspectFitWidthMode() throws Exception {
         RenderedOp image = readImage(IMAGE);
         final Interpolation interpolation =
                 Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
         final ReductionFactor rf = new ReductionFactor();
         final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
 
-        // test with Mode.FULL
-        Scale scale = new Scale();
-        scale.setMode(Scale.Mode.FULL);
-        RenderedOp scaledImage = JAIUtil.scaleImage(
-                image, scale, scaleConstraint, interpolation, rf);
-        assertSame(image, scaledImage);
-
-        // Mode.ASPECT_FIT_WIDTH
-        scale = new Scale();
-        scale.setMode(Scale.Mode.ASPECT_FIT_WIDTH);
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.ASPECT_FIT_WIDTH);
         // down
         int width = 50;
         scale.setWidth(width);
-        scaledImage = JAIUtil.scaleImage(
+        RenderedOp scaledImage = JAIUtil.scaleImage(
                 image, scale, scaleConstraint, interpolation, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(
@@ -219,14 +224,22 @@ public class JAIUtilTest extends BaseTest {
         assertEquals(
                 Math.round((width / (float) image.getWidth()) * image.getHeight()),
                 scaledImage.getHeight(), DELTA);
+    }
 
-        // Mode.ASPECT_FIT_HEIGHT
-        scale = new Scale();
-        scale.setMode(Scale.Mode.ASPECT_FIT_HEIGHT);
+    @Test
+    void scaleImageWithAspectFitHeightMode() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final Interpolation interpolation =
+                Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.ASPECT_FIT_HEIGHT);
         // down
         int height = 25;
         scale.setHeight(height);
-        scaledImage = JAIUtil.scaleImage(
+        RenderedOp scaledImage = JAIUtil.scaleImage(
                 image, scale, scaleConstraint, interpolation, rf);
         assertEquals(
                 Math.round((height / (float) image.getHeight()) * image.getWidth()),
@@ -241,16 +254,24 @@ public class JAIUtilTest extends BaseTest {
                 Math.round((height / (float) image.getHeight()) * image.getWidth()),
                 scaledImage.getWidth(), DELTA);
         assertEquals(height, scaledImage.getHeight(), DELTA);
+    }
 
-        // Mode.ASPECT_FIT_INSIDE
-        scale = new Scale();
-        scale.setMode(Scale.Mode.ASPECT_FIT_INSIDE);
+    @Test
+    void scaleImageWithAspectFitInsideMode() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final Interpolation interpolation =
+                Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.ASPECT_FIT_INSIDE);
         // down
-        width = 40;
-        height = 38;
+        int width = 40;
+        int height = 38;
         scale.setWidth(width);
         scale.setHeight(height);
-        scaledImage = JAIUtil.scaleImage(
+        RenderedOp scaledImage = JAIUtil.scaleImage(
                 image, scale, scaleConstraint, interpolation, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(
@@ -267,16 +288,24 @@ public class JAIUtilTest extends BaseTest {
         assertEquals(
                 Math.round((width / (float) image.getWidth()) * image.getHeight()),
                 scaledImage.getHeight(), DELTA);
+    }
 
-        // Mode.NON_ASPECT_FILL
-        scale = new Scale();
-        scale.setMode(Scale.Mode.NON_ASPECT_FILL);
+    @Test
+    void scaleImageWithNonAspectFillMode() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final Interpolation interpolation =
+                Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.NON_ASPECT_FILL);
         // down
-        width = 45;
-        height = 42;
+        int width = 45;
+        int height = 42;
         scale.setWidth(width);
         scale.setHeight(height);
-        scaledImage = JAIUtil.scaleImage(
+        RenderedOp scaledImage = JAIUtil.scaleImage(
                 image, scale, scaleConstraint, interpolation, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(height, scaledImage.getHeight(), DELTA);
@@ -289,13 +318,21 @@ public class JAIUtilTest extends BaseTest {
                 image, scale, scaleConstraint, interpolation, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(height, scaledImage.getHeight(), DELTA);
+    }
 
-        // Percent
-        scale = new Scale();
+    @Test
+    void scaleImageByPercent() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final Interpolation interpolation =
+                Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPercent scale = new ScaleByPercent();
         // down
         double percent = 0.5;
         scale.setPercent(percent);
-        scaledImage = JAIUtil.scaleImage(
+        RenderedOp scaledImage = JAIUtil.scaleImage(
                 image, scale, scaleConstraint, interpolation, rf);
         assertEquals(image.getWidth() * percent, scaledImage.getWidth(), DELTA);
         assertEquals(image.getHeight() * percent, scaledImage.getHeight(), DELTA);
@@ -313,25 +350,17 @@ public class JAIUtilTest extends BaseTest {
     /* scaleImageUsingSubsampleAverage() */
 
     @Test
-    public void scaleImageUsingSubsampleAverage() throws Exception {
+    void scaleImageUsingSubsampleAverageWithAspectFitWidthMode() throws Exception {
         RenderedOp image = readImage(IMAGE);
         final ReductionFactor rf = new ReductionFactor();
         final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
 
-        // test with Mode.FULL
-        Scale scale = new Scale();
-        scale.setMode(Scale.Mode.FULL);
-        RenderedOp scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
-                image, scale, scaleConstraint, rf);
-        assertSame(image, scaledImage);
-
-        // Mode.ASPECT_FIT_WIDTH
-        scale = new Scale();
-        scale.setMode(Scale.Mode.ASPECT_FIT_WIDTH);
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.ASPECT_FIT_WIDTH);
         // down
         int width = 50;
         scale.setWidth(width);
-        scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
+        RenderedOp scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
                 image, scale, scaleConstraint, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(
@@ -346,14 +375,20 @@ public class JAIUtilTest extends BaseTest {
         assertEquals(
                 width / (double) image.getWidth() * image.getHeight(),
                 scaledImage.getHeight(), DELTA);
+    }
 
-        // Mode.ASPECT_FIT_HEIGHT
-        scale = new Scale();
-        scale.setMode(Scale.Mode.ASPECT_FIT_HEIGHT);
+    @Test
+    void scaleImageUsingSubsampleAverageWithAspectFitHeightMode() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.ASPECT_FIT_HEIGHT);
         // down
         int height = 36;
         scale.setHeight(height);
-        scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
+        RenderedOp scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
                 image, scale, scaleConstraint, rf);
         assertEquals(
                 Math.floor(height / (double) image.getHeight() * image.getWidth()),
@@ -368,16 +403,22 @@ public class JAIUtilTest extends BaseTest {
                 Math.floor(height / (double) image.getHeight() * image.getWidth()),
                 scaledImage.getWidth(), DELTA);
         assertEquals(height, scaledImage.getHeight(), DELTA);
+    }
 
-        // Mode.ASPECT_FIT_INSIDE
-        scale = new Scale();
-        scale.setMode(Scale.Mode.ASPECT_FIT_INSIDE);
+    @Test
+    void scaleImageUsingSubsampleAverageWithAspectFitInsideMode() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.ASPECT_FIT_INSIDE);
         // down
-        width = 40;
-        height = 40;
+        int width = 40;
+        int height = 40;
         scale.setWidth(width);
         scale.setHeight(height);
-        scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
+        RenderedOp scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
                 image, scale, scaleConstraint, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(
@@ -394,16 +435,22 @@ public class JAIUtilTest extends BaseTest {
         assertEquals(
                 Math.ceil(width / (double) image.getWidth() * image.getHeight()),
                 scaledImage.getHeight(), DELTA);
+    }
 
-        // Mode.NON_ASPECT_FILL
-        scale = new Scale();
-        scale.setMode(Scale.Mode.NON_ASPECT_FILL);
+    @Test
+    void scaleImageUsingSubsampleAverageWithNonAspectFillMode() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPixels scale = new ScaleByPixels();
+        scale.setMode(ScaleByPixels.Mode.NON_ASPECT_FILL);
         // down
-        width = 45;
-        height = 42;
+        int width = 45;
+        int height = 42;
         scale.setWidth(width);
         scale.setHeight(height);
-        scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
+        RenderedOp scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
                 image, scale, scaleConstraint, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(height, scaledImage.getHeight(), DELTA);
@@ -416,13 +463,19 @@ public class JAIUtilTest extends BaseTest {
                 image, scale, scaleConstraint, rf);
         assertEquals(width, scaledImage.getWidth(), DELTA);
         assertEquals(height, scaledImage.getHeight(), DELTA);
+    }
 
-        // Percent
-        scale = new Scale();
+    @Test
+    void scaleImageUsingSubsampleAverageWithPercent() throws Exception {
+        RenderedOp image = readImage(IMAGE);
+        final ReductionFactor rf = new ReductionFactor();
+        final ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+
+        ScaleByPercent scale = new ScaleByPercent();
         // down
         double percent = 0.5;
         scale.setPercent(percent);
-        scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
+        RenderedOp scaledImage = JAIUtil.scaleImageUsingSubsampleAverage(
                 image, scale, scaleConstraint, rf);
         assertEquals(image.getWidth() * percent, scaledImage.getWidth(), DELTA);
         assertEquals(image.getHeight() * percent, scaledImage.getHeight(), DELTA);
@@ -440,7 +493,7 @@ public class JAIUtilTest extends BaseTest {
     /* sharpenImage() */
 
     @Test
-    public void sharpenImage() throws Exception {
+    void sharpenImage() throws Exception {
         RenderedOp image = readImage(IMAGE);
 
         // test with no-op sharpen
@@ -459,7 +512,7 @@ public class JAIUtilTest extends BaseTest {
     /* transformColor() */
 
     @Test
-    public void transformColorToBitonal() throws Exception {
+    void transformColorToBitonal() throws Exception {
         RenderedOp image = readImage(IMAGE);
         ColorTransform transform = ColorTransform.BITONAL;
 
@@ -469,7 +522,7 @@ public class JAIUtilTest extends BaseTest {
     }
 
     @Test
-    public void transformColorToGray() throws Exception {
+    void transformColorToGray() throws Exception {
         RenderedOp image = readImage(IMAGE);
         ColorTransform transform = ColorTransform.GRAY;
 
@@ -483,7 +536,7 @@ public class JAIUtilTest extends BaseTest {
     /* transposeImage() */
 
     @Test
-    public void transposeImage() throws Exception {
+    void transposeImage() throws Exception {
         RenderedOp image = readImage(IMAGE);
         // horizontal
         RenderedOp result = JAIUtil.transposeImage(image, Transpose.HORIZONTAL);
@@ -500,9 +553,15 @@ public class JAIUtilTest extends BaseTest {
         ImageReader reader = null;
         try {
             reader = new ImageReaderFactory().newImageReader(
-                    TestUtil.getImage(name), Format.PNG);
+                    Format.get("png"), TestUtil.getImage(name));
+
+            Crop crop          = (Crop) ops.getFirst(Crop.class);
+            Scale scale        = (Scale) ops.getFirst(Scale.class);
+            ScaleConstraint sc = new ScaleConstraint(1, 1);
+            ReductionFactor rf = new ReductionFactor();
+
             RenderedImage image = reader.readRendered(
-                    ops, Orientation.ROTATE_0, new ReductionFactor(), null);
+                    ops.getPageIndex(), crop, scale, sc, rf, null);
             PlanarImage planarImage = PlanarImage.wrapRenderedImage(image);
             return JAIUtil.getAsRenderedOp(planarImage);
         } finally {

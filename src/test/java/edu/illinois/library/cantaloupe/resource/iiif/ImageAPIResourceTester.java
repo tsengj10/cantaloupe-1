@@ -14,27 +14,29 @@ import edu.illinois.library.cantaloupe.http.Transport;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.source.AccessDeniedSource;
-import edu.illinois.library.cantaloupe.source.FileSource;
 import edu.illinois.library.cantaloupe.source.PathStreamFactory;
+import edu.illinois.library.cantaloupe.source.Source;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
-import edu.illinois.library.cantaloupe.source.StreamSource;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import edu.illinois.library.cantaloupe.util.SystemUtils;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
+import java.util.Iterator;
 
 import static edu.illinois.library.cantaloupe.test.Assert.HTTPAssert.*;
 import static edu.illinois.library.cantaloupe.test.Assert.PathAssert.*;
-import static org.junit.Assert.*;
-import static org.junit.Assume.assumeTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Collection of tests shareable between major versions of IIIF Image and
+ * Collection of tests common across major versions of IIIF Image and
  * Information endpoints.
  */
 public class ImageAPIResourceTester {
@@ -56,13 +58,33 @@ public class ImageAPIResourceTester {
         assertRepresentationContains("403 Forbidden", uri);
     }
 
+    public void testAuthorizationWhenNotAuthorizedWhenAccessingCachedResource(URI uri)
+            throws Exception {
+        initializeFilesystemCache();
+        Configuration config = Configuration.getInstance();
+        config.setProperty(Key.DERIVATIVE_CACHE_ENABLED, true);
+        config.setProperty(Key.DERIVATIVE_CACHE_TTL, 10);
+        config.setProperty(Key.INFO_CACHE_ENABLED, false);
+
+        // Request the resource to cache it.
+        // This status code may vary depending on the return value of a
+        // delegate method, but the way the tests are set up, it's 403.
+        assertStatus(403, uri);
+
+        Thread.sleep(1000); // the resource may write asynchronously
+
+        // Request it again. We expect to receive the same response. Any
+        // different response would indicate a logic error.
+        assertStatus(403, uri);
+    }
+
     public void testAuthorizationWhenScaleConstraining(URI uri)
             throws Exception {
         Client client = newClient(uri);
         try {
             Response response = client.send();
             assertEquals(302, response.getStatus());
-            assertEquals(uri.toString().replace("reduce.jpg", "reduce.jpg-1:2"),
+            assertEquals(uri.toString().replace("reduce.jpg", "reduce.jpg;1:2"),
                     response.getHeaders().getFirstValue("Location"));
         } finally {
             client.stop();
@@ -97,16 +119,16 @@ public class ImageAPIResourceTester {
             fail("Expected exception");
         } catch (ResourceException e) {
             assertEquals("no-cache, must-revalidate",
-                    e.getResponse().getHeaders().get("Cache-Control"));
+                    e.getResponse().getHeaders().getFirstValue("Cache-Control"));
         } finally {
             client.stop();
         }
     }
 
     /**
-     * Tests that there is no Cache-Control header returned when
-     * cache.httpClient.enabled = true but a cache=false argument is present in the
-     * URL query.
+     * Tests that there is no {@code Cache-Control} header returned when
+     * {@code cache.client.enabled = true} but a {@code cache=false} argument
+     * is present in the URL query.
      */
     public void testCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL(URI uri)
             throws Exception {
@@ -159,12 +181,54 @@ public class ImageAPIResourceTester {
         }
     }
 
-    public void testForbidden(URI uri) {
-        Configuration config = Configuration.getInstance();
-        config.setProperty(Key.SOURCE_STATIC,
-                AccessDeniedSource.class.getName());
+    public void testCachingWhenCachesAreEnabledAndRecacheQueryArgumentIsSupplied(URI uri)
+            throws Exception {
+        Path cacheDir = initializeFilesystemCache();
 
-        assertStatus(403, uri);
+        // request an image
+        Client client = newClient(uri);
+        try {
+            client.send();
+
+            class FileTimeHolder {
+                FileTime time;
+            }
+            final FileTimeHolder timeHolder = new FileTimeHolder();
+            class FileCreationTimeChecker<T> extends SimpleFileVisitor<T> {
+                @Override
+                public FileVisitResult visitFile(T file,
+                                                 BasicFileAttributes attrs) throws IOException {
+                    BasicFileAttributes fattrs = Files.readAttributes(
+                            (Path) file,
+                            BasicFileAttributes.class);
+                    timeHolder.time = fattrs.creationTime();
+                    return FileVisitResult.CONTINUE;
+                }
+            }
+
+            final FileCreationTimeChecker<Path> visitor =
+                    new FileCreationTimeChecker<>();
+            FileTime time1, time2;
+
+            // check its last-modified time
+            Files.walkFileTree(cacheDir, visitor);
+            time1 = timeHolder.time;
+
+            // FileTime only has 1-second precision so wait at least that long.
+            Thread.sleep(2000);
+
+            // request it again
+            client.send();
+
+            // check its last-modified time again
+            Files.walkFileTree(cacheDir, visitor);
+            time2 = timeHolder.time;
+
+            // assert that the times have changed
+            assertTrue(time2.compareTo(time1) > 0);
+        } finally {
+            client.stop();
+        }
     }
 
     public void testForwardSlashInIdentifier(URI uri) {
@@ -173,6 +237,11 @@ public class ImageAPIResourceTester {
 
     public void testBackslashInIdentifier(URI uri) {
         assertStatus(200, uri);
+    }
+
+    public void testIllegalCharactersInIdentifier(String uri) {
+        // TODO: this is difficult to test because our HTTP client only accepts
+        // java.net.URI instances which don't allow illegal characters in them.
     }
 
     public void testHTTP2(URI uri) throws Exception {
@@ -196,7 +265,6 @@ public class ImageAPIResourceTester {
     }
 
     public void testHTTPS2(URI uri) throws Exception {
-        assumeTrue(SystemUtils.isALPNAvailable());
         Client client = newClient(uri);
         try {
             client.setTransport(Transport.HTTP2_0);
@@ -205,6 +273,14 @@ public class ImageAPIResourceTester {
         } finally {
             client.stop();
         }
+    }
+
+    public void testForbidden(URI uri) {
+        Configuration config = Configuration.getInstance();
+        config.setProperty(Key.SOURCE_STATIC,
+                AccessDeniedSource.class.getName());
+
+        assertStatus(403, uri);
     }
 
     public void testNotFound(URI uri) {
@@ -245,10 +321,19 @@ public class ImageAPIResourceTester {
         client.send();
     }
 
+    public void testRecoveryFromIncorrectSourceFormat(URI uri) throws Exception {
+        Client client = newClient(uri);
+        try {
+            client.send(); // should throw an exception if anything goes wrong
+        } finally {
+            client.stop();
+        }
+    }
+
     /**
      * Used by {@link #testSourceCheckAccessNotCalledWithSourceCacheHit}.
      */
-    public static class NotCheckingAccessSource implements StreamSource {
+    public static class NotCheckingAccessSource implements Source {
 
         @Override
         public void checkAccess() throws IOException {
@@ -256,8 +341,18 @@ public class ImageAPIResourceTester {
         }
 
         @Override
-        public Format getFormat() {
-            return Format.JPG;
+        public Iterator<Format> getFormatIterator() {
+            return new Iterator<>() {
+                @Override
+                public boolean hasNext() {
+                    return true;
+                }
+
+                @Override
+                public Format next() {
+                    return Format.get("jpg");
+                }
+            };
         }
 
         @Override
@@ -266,7 +361,7 @@ public class ImageAPIResourceTester {
         }
 
         @Override
-        public StreamFactory newStreamFactory() throws IOException {
+        public StreamFactory newStreamFactory() {
             return new PathStreamFactory(TestUtil.getImage("jpg"));
         }
 
@@ -294,7 +389,7 @@ public class ImageAPIResourceTester {
 
         // Put an image in the source cache.
         Path image = TestUtil.getImage("jpg");
-        SourceCache sourceCache = CacheFactory.getSourceCache();
+        SourceCache sourceCache = CacheFactory.getSourceCache().get();
 
         try (OutputStream os = sourceCache.newSourceImageOutputStream(identifier)) {
             Files.copy(image, os);
@@ -313,14 +408,24 @@ public class ImageAPIResourceTester {
     /**
      * Used by {@link #testSourceGetFormatNotCalledWithSourceCacheHit(Identifier, URI)}.
      */
-    public static class NotReadingSourceFormatSource implements StreamSource {
+    public static class NotReadingSourceFormatSource implements Source {
 
         @Override
         public void checkAccess() {}
 
         @Override
-        public Format getFormat() throws IOException {
-            throw new IOException("getFormat() called!");
+        public Iterator<Format> getFormatIterator() {
+            return new Iterator<>() {
+                @Override
+                public boolean hasNext() {
+                    return true;
+                }
+
+                @Override
+                public Format next() {
+                    return Format.UNKNOWN;
+                }
+            };
         }
 
         @Override
@@ -329,7 +434,7 @@ public class ImageAPIResourceTester {
         }
 
         @Override
-        public StreamFactory newStreamFactory() throws IOException {
+        public StreamFactory newStreamFactory() {
             return new PathStreamFactory(TestUtil.getImage("jpg"));
         }
 
@@ -357,7 +462,7 @@ public class ImageAPIResourceTester {
 
         // Put an image in the source cache.
         Path image = TestUtil.getImage("jpg");
-        SourceCache sourceCache = CacheFactory.getSourceCache();
+        SourceCache sourceCache = CacheFactory.getSourceCache().get();
 
         try (OutputStream os = sourceCache.newSourceImageOutputStream(identifier)) {
             Files.copy(image, os);
@@ -366,7 +471,7 @@ public class ImageAPIResourceTester {
         Client client = newClient(uri);
         try {
             client.send();
-            // We are expecting NotReadingSourceFormatSource.getFormat()
+            // We are expecting NotReadingSourceFormatSource.getFormatIterator()
             // to not throw an exception, which would cause a 500 response.
         } finally {
             client.stop();
@@ -374,10 +479,10 @@ public class ImageAPIResourceTester {
     }
 
     /**
-     * Tests that the server responds with HTTP 500 when a non-
-     * {@link FileSource} is
-     * used with a non-
-     * {@link edu.illinois.library.cantaloupe.processor.StreamProcessor}.
+     * Tests that the server responds with HTTP 500 when a {@link Source} that
+     * {@link Source#supportsFileAccess() doesn't support file access} is used
+     * with a non-{@link
+     * edu.illinois.library.cantaloupe.processor.StreamProcessor}.
      */
     public void testSourceProcessorCompatibility(URI uri,
                                                  String appServerHost,
@@ -388,8 +493,7 @@ public class ImageAPIResourceTester {
                 "BasicLookupStrategy");
         config.setProperty(Key.HTTPSOURCE_URL_PREFIX,
                 appServerHost + ":" + appServerPort + "/");
-        config.setProperty("processor.jp2", "KakaduDemoProcessor");
-        config.setProperty(Key.PROCESSOR_FALLBACK, "KakaduProcessor");
+        config.setProperty("processor.jp2", "OpenJpegProcessor");
 
         assertStatus(500, uri);
     }

@@ -10,7 +10,6 @@ import edu.illinois.library.cantaloupe.operation.ColorTransform;
 import edu.illinois.library.cantaloupe.operation.Crop;
 import edu.illinois.library.cantaloupe.operation.CropByPercent;
 import edu.illinois.library.cantaloupe.operation.Encode;
-import edu.illinois.library.cantaloupe.operation.MetadataCopy;
 import edu.illinois.library.cantaloupe.operation.Operation;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
@@ -20,11 +19,11 @@ import edu.illinois.library.cantaloupe.operation.Sharpen;
 import edu.illinois.library.cantaloupe.operation.Transpose;
 import edu.illinois.library.cantaloupe.operation.overlay.Overlay;
 import edu.illinois.library.cantaloupe.operation.redaction.Redaction;
-import edu.illinois.library.cantaloupe.processor.codec.ImageWriter;
 import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
-import edu.illinois.library.cantaloupe.processor.codec.JPEG2000KakaduImageReader;
+import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFacade;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg.TurboJPEGImageWriter;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg2000.JPEG2000KakaduImageReader;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 import kdu_jni.KduException;
 import kdu_jni.Kdu_global;
 
@@ -35,8 +34,6 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Path;
-import java.util.Collections;
-import java.util.EnumSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -47,28 +44,9 @@ import java.util.stream.Collectors;
  *
  * <p>{@link JPEG2000KakaduImageReader} is used to acquire a scaled region of
  * interest that is {@link BufferedImage buffered in memory}, and Java 2D is
- * used for all post-scale processing steps.</p>
- *
- * <h1>Comparison with {@link KakaduDemoProcessor}</h1>
- *
- * <p>Compared to {@link KakaduDemoProcessor}, this one offers a number of
- * advantages:</p>
- *
- * <ul>
- *     <li>It doesn't need to invoke a process.</li>
- *     <li>It doesn't have to do intermediary conversions to and from TIFF.</li>
- *     <li>It doesn't do differential scaling in Java, and instead uses the
- *     high-quality optimized scaler built into {@link
- *     kdu_jni.Kdu_region_decompressor}.</li>
- *     <li>It doesn't have to open the same source image twice.</li>
- *     <li>Thanks to all of the above, it's significantly faster.</li>
- *     <li>It can read from both {@link FileProcessor files} and {@link
- *     StreamProcessor streams}.</li>
- *     <li>It can copy source XMP metadata into derivatives.</li>
- *     <li>It works equally efficiently in Windows.</li>
- *     <li>It doesn't have to resort to silly tricks involving symlinks and
- *     {@literal /dev/stdout}.</li>
- * </ul>
+ * used for all post-scale processing steps. If libjpeg-turbo is {@link
+ * TurboJPEGImageWriter#isTurboJPEGAvailable() available}, that is used to
+ * write the result, otherwise Image I/O is used.</p>
  *
  * <h1>Usage</h1>
  *
@@ -91,36 +69,6 @@ class KakaduNativeProcessor implements FileProcessor, StreamProcessor {
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(KakaduNativeProcessor.class);
-
-    private static final Set<ProcessorFeature> SUPPORTED_FEATURES = EnumSet.of(
-            ProcessorFeature.MIRRORING,
-            ProcessorFeature.REGION_BY_PERCENT,
-            ProcessorFeature.REGION_BY_PIXELS,
-            ProcessorFeature.REGION_SQUARE,
-            ProcessorFeature.ROTATION_ARBITRARY,
-            ProcessorFeature.ROTATION_BY_90S,
-            ProcessorFeature.SIZE_ABOVE_FULL,
-            ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-            ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-            ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-            ProcessorFeature.SIZE_BY_HEIGHT,
-            ProcessorFeature.SIZE_BY_PERCENT,
-            ProcessorFeature.SIZE_BY_WIDTH,
-            ProcessorFeature.SIZE_BY_WIDTH_HEIGHT);
-
-    private static final Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-            SUPPORTED_IIIF_1_1_QUALITIES = EnumSet.of(
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.BITONAL,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.COLOR,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.GREY,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.NATIVE);
-
-    private static final Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-            SUPPORTED_IIIF_2_0_QUALITIES = EnumSet.of(
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.BITONAL,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.COLOR,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.DEFAULT,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.GRAY);
 
     private static final AtomicBoolean IS_CLASS_INITIALIZED = new AtomicBoolean();
 
@@ -177,49 +125,12 @@ class KakaduNativeProcessor implements FileProcessor, StreamProcessor {
 
     @Override
     public Format getSourceFormat() {
-        return Format.JP2;
+        return Format.get("jp2");
     }
 
     @Override
     public StreamFactory getStreamFactory() {
         return streamFactory;
-    }
-
-    @Override
-    public Set<ProcessorFeature> getSupportedFeatures() {
-        Set<ProcessorFeature> features;
-        if (!getAvailableOutputFormats().isEmpty()) {
-            features = SUPPORTED_FEATURES;
-        } else {
-            features = Collections.emptySet();
-        }
-        return Collections.unmodifiableSet(features);
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-    getSupportedIIIF1Qualities() {
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-                qualities;
-        if (!getAvailableOutputFormats().isEmpty()) {
-            qualities = SUPPORTED_IIIF_1_1_QUALITIES;
-        } else {
-            qualities = Collections.emptySet();
-        }
-        return Collections.unmodifiableSet(qualities);
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-    getSupportedIIIF2Qualities() {
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-                qualities;
-        if (!getAvailableOutputFormats().isEmpty()) {
-            qualities = SUPPORTED_IIIF_2_0_QUALITIES;
-        } else {
-            qualities = Collections.emptySet();
-        }
-        return Collections.unmodifiableSet(qualities);
     }
 
     @Override
@@ -235,9 +146,9 @@ class KakaduNativeProcessor implements FileProcessor, StreamProcessor {
 
     @Override
     public void setSourceFormat(Format format)
-            throws UnsupportedSourceFormatException {
-        if (!Format.JP2.equals(format)) {
-            throw new UnsupportedSourceFormatException(format);
+            throws SourceFormatException {
+        if (!supportsSourceFormat(format)) {
+            throw new SourceFormatException(format);
         }
     }
 
@@ -252,9 +163,14 @@ class KakaduNativeProcessor implements FileProcessor, StreamProcessor {
     }
 
     @Override
+    public boolean supportsSourceFormat(Format format) {
+        return Format.get("jp2").equals(format);
+    }
+
+    @Override
     public void process(final OperationList opList,
                         final Info info,
-                        final OutputStream outputStream) throws ProcessorException {
+                        final OutputStream outputStream) throws FormatException, ProcessorException {
         final Rectangle roi       = getRegionBounds(opList, info.getSize());
         final Scale scaleOp       = (Scale) opList.getFirst(Scale.class);
         final ReductionFactor reductionFactor = new ReductionFactor();
@@ -266,6 +182,8 @@ class KakaduNativeProcessor implements FileProcessor, StreamProcessor {
                     reductionFactor, diffScales);
             postProcess(image, opList, diffScales, info, reductionFactor,
                     outputStream);
+        } catch (SourceFormatException e) {
+            throw e;
         } catch (IOException e) {
             throw new ProcessorException(e.getMessage(), e);
         }
@@ -292,21 +210,29 @@ class KakaduNativeProcessor implements FileProcessor, StreamProcessor {
      * @param opList          List of operations to apply to {@literal image}.
      * @param diffScales      Differential X and Y scales that have already
      *                        been applied to {@literal image}.
-     * @param imageInfo       Information about the source image.
+     * @param info            Information about the source image.
      * @param reductionFactor May be {@literal null}.
      * @param outputStream    Stream to write the resulting image to.
      */
     private void postProcess(BufferedImage image,
                              final OperationList opList,
                              final double[] diffScales,
-                             final Info imageInfo,
+                             final Info info,
                              ReductionFactor reductionFactor,
                              final OutputStream outputStream) throws IOException {
         if (reductionFactor == null) {
             reductionFactor = new ReductionFactor();
         }
 
-        final Dimension fullSize = imageInfo.getSize();
+        final Dimension fullSize = info.getSize();
+
+        final Metadata metadata = info.getMetadata();
+        if (metadata != null) {
+            Orientation orientation = metadata.getOrientation();
+            if (!Orientation.ROTATE_0.equals(orientation)) {
+                image = Java2DUtil.rotate(image, orientation);
+            }
+        }
 
         // Apply redactions.
         final Set<Redaction> redactions = opList.stream()
@@ -341,28 +267,45 @@ class KakaduNativeProcessor implements FileProcessor, StreamProcessor {
             }
         }
 
-        ImageWriter writer = new ImageWriterFactory()
-                .newImageWriter((Encode) opList.getFirst(Encode.class));
-        if (opList.getFirst(MetadataCopy.class) != null) {
-            String xmp = reader.getXMP();
-            if (xmp != null) {
-                Metadata metadata = new Metadata();
-                metadata.setXMP(xmp);
-                writer.setMetadata(metadata);
-            }
-        }
-        writer.write(image, outputStream);
+        // Write the result.
+        final Encode encode = (Encode) opList.getFirst(Encode.class);
+        ImageWriterFacade.write(image, encode, outputStream);
     }
 
     @Override
     public Info readInfo() throws IOException {
         return Info.builder()
-                .withFormat(Format.JP2)
+                .withFormat(Format.get("jp2"))
                 .withSize(reader.getWidth(), reader.getHeight())
                 .withTileSize(reader.getTileWidth(), reader.getTileHeight())
-                .withOrientation(Orientation.ROTATE_0) // TODO: may need to parse the EXIF to get this?
                 .withNumResolutions(reader.getNumDecompositionLevels() + 1)
+                .withMetadata(readMetadata())
                 .build();
+    }
+
+    private Metadata readMetadata() throws IOException {
+        final Metadata metadata = new Metadata();
+        // EXIF
+        byte[] bytes = reader.getEXIF();
+        if (bytes != null) {
+            try (edu.illinois.library.cantaloupe.image.exif.Reader reader =
+                         new edu.illinois.library.cantaloupe.image.exif.Reader()) {
+                reader.setSource(bytes);
+                metadata.setEXIF(reader.read());
+            }
+        }
+        // IPTC
+        bytes = reader.getIPTC();
+        if (bytes != null) {
+            try (edu.illinois.library.cantaloupe.image.iptc.Reader iptcReader =
+                         new edu.illinois.library.cantaloupe.image.iptc.Reader()) {
+                iptcReader.setSource(bytes);
+                metadata.setIPTC(iptcReader.read());
+            }
+        }
+        // XMP
+        metadata.setXMP(reader.getXMP());
+        return metadata;
     }
 
 }

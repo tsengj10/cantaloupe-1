@@ -3,58 +3,57 @@ package edu.illinois.library.cantaloupe.source;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.resource.RequestContext;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.DelegateProxyService;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class SourceFactoryTest extends BaseTest {
 
     private SourceFactory instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         instance = new SourceFactory();
     }
 
     @Test
-    public void getAllSources() {
-        assertEquals(6, SourceFactory.getAllSources().size());
+    void getAllSources() {
+        assertEquals(5, SourceFactory.getAllSources().size());
     }
 
     /* newSource(String) */
 
     @Test
-    public void testNewSourceWithStringWithUnqualifiedName() throws Exception {
+    void testNewSourceWithStringWithUnqualifiedName() throws Exception {
         assertTrue(instance.newSource(FilesystemSource.class.getSimpleName()) instanceof FilesystemSource);
     }
 
-    @Test(expected = ClassNotFoundException.class)
-    public void testNewSourceWithStringWithNonExistingUnqualifiedName() throws Exception {
-        instance.newSource("Bogus");
+    @Test
+    void testNewSourceWithStringWithNonExistingUnqualifiedName() {
+        assertThrows(ClassNotFoundException.class, () ->
+                instance.newSource("Bogus"));
     }
 
     @Test
-    public void testNewSourceWithStringWithQualifiedName() throws Exception {
+    void testNewSourceWithStringWithQualifiedName() throws Exception {
         assertTrue(instance.newSource(FilesystemSource.class.getName()) instanceof FilesystemSource);
     }
 
-    @Test(expected = ClassNotFoundException.class)
-    public void testNewSourceWithStringWithNonExistingQualifiedName() throws Exception {
-        instance.newSource(SourceFactory.class.getPackage().getName() + ".Bogus");
+    @Test
+    void testNewSourceWithStringWithNonExistingQualifiedName() {
+        assertThrows(ClassNotFoundException.class, () ->
+                instance.newSource(SourceFactory.class.getPackage().getName() + ".Bogus"));
     }
 
     /* newSource(Identifier, DelegateProxy) */
 
     @Test
-    public void newSourceWithIdentifierValidStaticResolverSimpleClassName()
-            throws Exception {
+    void newSourceWithIdentifierWithValidStaticSourceSimpleClassName() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.SOURCE_STATIC,
                 HttpSource.class.getSimpleName());
@@ -65,7 +64,7 @@ public class SourceFactoryTest extends BaseTest {
     }
 
     @Test
-    public void newSourceWithIdentifierWithValidStaticResolverFullClassName()
+    void newSourceWithIdentifierWithValidStaticSourceFullClassName()
             throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.SOURCE_STATIC, HttpSource.class.getName());
@@ -76,44 +75,37 @@ public class SourceFactoryTest extends BaseTest {
         assertTrue(source instanceof HttpSource);
     }
 
-    @Test(expected = ClassNotFoundException.class)
-    public void newSourceWithIdentifierWithInvalidStaticResolver() throws Exception {
+    @Test
+    void newSourceWithIdentifierWithInvalidStaticSource() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.SOURCE_STATIC, "BogusSource");
 
         Identifier identifier = new Identifier("cats");
-        instance.newSource(identifier, null);
+        assertThrows(ClassNotFoundException.class,
+                () -> instance.newSource(identifier, null));
     }
 
     @Test
-    public void newSourceWithIdentifierUsingDelegateScript() throws Exception {
+    void newSourceWithIdentifierUsingDelegateScript() throws Exception {
         Configuration config = Configuration.getInstance();
-        config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-        config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                TestUtil.getFixture("delegates.rb").toString());
         config.setProperty(Key.SOURCE_DELEGATE, true);
 
         Identifier identifier = new Identifier("http");
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
 
         Source source = instance.newSource(identifier, proxy);
         assertTrue(source instanceof HttpSource);
 
         identifier = new Identifier("anythingelse");
-        context = new RequestContext();
-        context.setIdentifier(identifier);
-        service = DelegateProxyService.getInstance();
-        proxy = service.newDelegateProxy(context);
+        proxy.getRequestContext().setIdentifier(identifier);
 
         source = instance.newSource(identifier, proxy);
         assertTrue(source instanceof FilesystemSource);
     }
 
     @Test
-    public void getSelectionStrategy() {
+    void getSelectionStrategy() {
         Configuration config = Configuration.getInstance();
 
         config.setProperty(Key.SOURCE_DELEGATE, "false");

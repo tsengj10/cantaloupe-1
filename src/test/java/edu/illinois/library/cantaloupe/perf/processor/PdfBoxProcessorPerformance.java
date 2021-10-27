@@ -1,5 +1,6 @@
 package edu.illinois.library.cantaloupe.perf.processor;
 
+import java.io.OutputStream;
 import java.util.concurrent.TimeUnit;
 
 import edu.illinois.library.cantaloupe.config.Configuration;
@@ -11,7 +12,6 @@ import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.processor.FileProcessor;
 import edu.illinois.library.cantaloupe.processor.ProcessorFactory;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.apache.commons.io.output.NullOutputStream;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -36,7 +36,7 @@ import static edu.illinois.library.cantaloupe.test.PerformanceTestConstants.*;
 @Fork(value = 1, jvmArgs = { "-server", "-Xms128M", "-Xmx128M", "-Dcantaloupe.config=memory" })
 public class PdfBoxProcessorPerformance {
 
-    private static final Format OUTPUT_FORMAT = Format.PNG;
+    private static final Format OUTPUT_FORMAT = Format.get("png");
 
     private FileProcessor processor;
 
@@ -44,7 +44,7 @@ public class PdfBoxProcessorPerformance {
     public void setUp() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_FALLBACK, "PdfBoxProcessor");
-        processor = (FileProcessor) new ProcessorFactory().newProcessor(Format.PDF);
+        processor = (FileProcessor) new ProcessorFactory().newProcessor(Format.get("pdf"));
     }
 
     @TearDown
@@ -54,17 +54,17 @@ public class PdfBoxProcessorPerformance {
 
     @Benchmark
     public void process() throws Exception {
-        processor.setSourceFormat(Format.PDF);
+        processor.setSourceFormat(Format.get("pdf"));
         processor.setSourceFile(TestUtil.getImage("pdf"));
         processor.process(
-                new OperationList(new Encode(OUTPUT_FORMAT)),
+                OperationList.builder().withOperations(new Encode(OUTPUT_FORMAT)).build(),
                 Info.builder().withSize(64, 56).build(),
-                new NullOutputStream());
+                OutputStream.nullOutputStream());
     }
 
     @Benchmark
     public void readInfo() throws Exception {
-        processor.setSourceFormat(Format.PDF);
+        processor.setSourceFormat(Format.get("pdf"));
         processor.setSourceFile(TestUtil.getImage("pdf"));
         processor.readInfo();
     }

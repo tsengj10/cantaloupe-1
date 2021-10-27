@@ -10,13 +10,14 @@ import edu.illinois.library.cantaloupe.processor.MockFileProcessor;
 import edu.illinois.library.cantaloupe.processor.ProcessorFactory;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Optional;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class InfoServiceTest extends BaseTest {
 
@@ -24,7 +25,7 @@ public class InfoServiceTest extends BaseTest {
 
     private InfoService instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
@@ -41,8 +42,8 @@ public class InfoServiceTest extends BaseTest {
                 "ManualSelectionStrategy");
         config.setProperty(Key.PROCESSOR_FALLBACK, "Java2dProcessor");
         try (FileProcessor proc = (FileProcessor) new ProcessorFactory().
-                newProcessor(Format.JPG)) {
-            proc.setSourceFormat(Format.JPG);
+                newProcessor(Format.get("jpg"))) {
+            proc.setSourceFormat(Format.get("jpg"));
             proc.setSourceFile(TestUtil.getImage("jpg"));
             return proc;
         }
@@ -50,7 +51,7 @@ public class InfoServiceTest extends BaseTest {
 
     private FileProcessor newMockProcessor() throws Exception {
         FileProcessor proc = new MockFileProcessor();
-        proc.setSourceFormat(Format.JPG);
+        proc.setSourceFormat(Format.get("jpg"));
         proc.setSourceFile(TestUtil.getImage("jpg"));
         return proc;
     }
@@ -71,76 +72,108 @@ public class InfoServiceTest extends BaseTest {
     /* getInfo() */
 
     @Test
-    public void testGetInfoWithHitInMemoryCache() throws Exception {
+    void testGetInfoWithHitInMemoryCache() throws Exception {
         final Identifier identifier = new Identifier("jpg");
         final Info info = new Info();
         instance.putInObjectCache(identifier, info);
 
-        Info actualInfo = instance.getInfo(identifier);
-        assertEquals(info, actualInfo);
+        Optional<Info> actualInfo = instance.getInfo(identifier);
+        assertEquals(info, actualInfo.orElseThrow());
     }
 
     @Test
-    public void testGetInfoWithHitInDerivativeCache() throws Exception {
+    void testGetInfoWithHitInDerivativeCache() throws Exception {
         useFilesystemCache();
 
         final Identifier identifier = new Identifier("jpg");
         final Info info = new Info();
 
-        DerivativeCache cache = CacheFactory.getDerivativeCache();
+        DerivativeCache cache = CacheFactory.getDerivativeCache().get();
         cache.put(identifier, info);
 
-        Info actualInfo = instance.getInfo(identifier);
-        assertEquals(info, actualInfo);
+        Optional<Info> actualInfo = instance.getInfo(identifier);
+        assertEquals(info, actualInfo.orElseThrow());
     }
 
     @Test
-    public void testGetInfoWithMissEverywhere() throws Exception {
+    void testGetInfoWithCorruptHitInDerivativeCache() throws Exception {
+        useFilesystemCache();
+
+        final Identifier identifier = new Identifier("jpg");
+        final String info           = "{\"this\": is corrupt JSON}";
+
+        DerivativeCache cache = CacheFactory.getDerivativeCache().get();
+        cache.put(identifier, info);
+
+        Optional<Info> actualInfo = instance.getInfo(identifier);
+        assertFalse(actualInfo.isPresent());
+    }
+
+    @Test
+    void testGetInfoWithMissEverywhere() throws Exception {
         final Identifier identifier = new Identifier("jpg");
 
-        Info info = instance.getInfo(identifier);
-        assertNull(info);
+        Optional<Info> info = instance.getInfo(identifier);
+        assertFalse(info.isPresent());
     }
 
     /* getOrReadInfo() */
 
     @Test
-    public void testGetOrReadInfoWithHitInMemoryCache() throws Exception {
+    void testGetOrReadInfoWithHitInMemoryCache() throws Exception {
         final Identifier identifier = new Identifier("jpg");
         final Info info = new Info();
         instance.putInObjectCache(identifier, info);
 
-        Info actualInfo = instance.getOrReadInfo(identifier, newMockProcessor());
-        assertEquals(info, actualInfo);
+        Optional<Info> actualInfo = instance.getOrReadInfo(identifier, newMockProcessor());
+        assertEquals(info, actualInfo.orElse(null));
     }
 
     @Test
-    public void testGetOrReadInfoWithHitInDerivativeCache() throws Exception {
+    void testGetOrReadInfoWithHitInDerivativeCache() throws Exception {
         useFilesystemCache();
 
         final Identifier identifier = new Identifier("jpg");
         final Info info = new Info();
 
-        DerivativeCache cache = CacheFactory.getDerivativeCache();
+        DerivativeCache cache = CacheFactory.getDerivativeCache().get();
         cache.put(identifier, info);
 
-        Info actualInfo = instance.getOrReadInfo(identifier, newMockProcessor());
-        assertEquals(info, actualInfo);
+        Optional<Info> actualInfo = instance.getOrReadInfo(identifier, newMockProcessor());
+        assertEquals(info, actualInfo.orElse(null));
+    }
+
+    /**
+     * Tests that, if a cached info exists but is corrupt, an info is retrieved
+     * from the processor instead.
+     */
+    @Test
+    void testGetOrReadInfoWithCorruptHitInDerivativeCache() throws Exception {
+        useFilesystemCache();
+
+        final Identifier identifier = new Identifier("jpg");
+        final String info = "{\"this\": is corrupt JSON}";
+
+        DerivativeCache cache = CacheFactory.getDerivativeCache().get();
+        cache.put(identifier, info);
+
+        Optional<Info> actualInfo = instance.getOrReadInfo(identifier, newMockProcessor());
+        assertEquals(identifier, actualInfo.get().getIdentifier());
     }
 
     @Test
-    public void testGetOrReadInfoWithHitInProcessor() throws Exception {
+    void testGetOrReadInfoWithHitInProcessor() throws Exception {
         final Identifier identifier = new Identifier("jpg");
 
-        Info info = instance.getOrReadInfo(identifier, newFileProcessor());
-        assertEquals(identifier, info.getIdentifier());
-        assertEquals(64, info.getSize(0).width(), DELTA);
+        Optional<Info> info = instance.getOrReadInfo(identifier, newFileProcessor());
+        assertEquals(identifier, info.orElseThrow().getIdentifier());
+        assertEquals(64, info.orElseThrow().getSize(0).width(), DELTA);
     }
 
     /* isObjectCacheEnabled() */
 
     @Test
-    public void testIsObjectCacheEnabled() {
+    void testIsObjectCacheEnabled() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.INFO_CACHE_ENABLED, true);
         assertTrue(instance.isObjectCacheEnabled());
@@ -152,7 +185,7 @@ public class InfoServiceTest extends BaseTest {
     /* purgeObjectCache() */
 
     @Test
-    public void testPurgeObjectCache() {
+    void testPurgeObjectCache() {
         final Identifier identifier = new Identifier("cats");
         final Info info = new Info();
         instance.putInObjectCache(identifier, info);
@@ -165,7 +198,7 @@ public class InfoServiceTest extends BaseTest {
     /* purgeObjectCache(Identifier) */
 
     @Test
-    public void testPurgeObjectCacheWithIdentifier() {
+    void testPurgeObjectCacheWithIdentifier() {
         final Identifier id1 = new Identifier("cats");
         final Identifier id2 = new Identifier("dogs");
         final Info info = new Info();

@@ -8,22 +8,18 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
 /**
  * <p>Encapsulates an image overlaid on top of another image.</p>
  *
- * <p>Instances should be obtained from the {@link OverlayService}.</p>
+ * <p>Instances should be obtained from the {@link OverlayFactory}.</p>
  */
 public class ImageOverlay extends Overlay implements Operation {
 
-    static final Set<String> SUPPORTED_URI_SCHEMES = Collections.unmodifiableSet(
-            new HashSet<>(Arrays.asList("file", "http", "https")));
+    static final Set<String> SUPPORTED_URI_SCHEMES =
+            Set.of("file", "http", "https");
 
     private static final ImageOverlayCache OVERLAY_CACHE =
             new ImageOverlayCache();
@@ -75,12 +71,11 @@ public class ImageOverlay extends Overlay implements Operation {
     @Override
     public Map<String, Object> toMap(Dimension fullSize,
                                      ScaleConstraint scaleConstraint) {
-        final HashMap<String,Object> map = new HashMap<>();
-        map.put("class", getClass().getSimpleName());
-        map.put("uri", getURI().toString());
-        map.put("position", getPosition().toString());
-        map.put("inset", getInset());
-        return Collections.unmodifiableMap(map);
+        return Map.of(
+                "class", getClass().getSimpleName(),
+                "uri", getURI().toString(),
+                "position", getPosition().toString(),
+                "inset", getInset());
     }
 
     /**

@@ -1,5 +1,6 @@
 package edu.illinois.library.cantaloupe.perf.processor;
 
+import java.io.OutputStream;
 import java.util.concurrent.TimeUnit;
 
 import edu.illinois.library.cantaloupe.config.Configuration;
@@ -11,7 +12,6 @@ import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.processor.FileProcessor;
 import edu.illinois.library.cantaloupe.processor.ProcessorFactory;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.apache.commons.io.output.NullOutputStream;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -36,8 +36,8 @@ import static edu.illinois.library.cantaloupe.test.PerformanceTestConstants.*;
 @Fork(value = 1, jvmArgs = { "-server", "-Xms128M", "-Xmx128M", "-Dcantaloupe.config=memory" })
 public class TurboJpegProcessorPerformance {
 
-    private static final Format SOURCE_FORMAT = Format.JPG;
-    private static final Format OUTPUT_FORMAT = Format.JPG;
+    private static final Format SOURCE_FORMAT = Format.get("jpg");
+    private static final Format OUTPUT_FORMAT = Format.get("jpg");
 
     private FileProcessor processor;
 
@@ -58,9 +58,9 @@ public class TurboJpegProcessorPerformance {
         processor.setSourceFormat(SOURCE_FORMAT);
         processor.setSourceFile(TestUtil.getImage("jpg"));
         processor.process(
-                new OperationList(new Encode(OUTPUT_FORMAT)),
+                OperationList.builder().withOperations(new Encode(OUTPUT_FORMAT)).build(),
                 Info.builder().withSize(64, 56).build(),
-                new NullOutputStream());
+                OutputStream.nullOutputStream());
     }
 
     @Benchmark

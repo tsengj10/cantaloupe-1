@@ -1,5 +1,6 @@
 package edu.illinois.library.cantaloupe.cache;
 
+import com.fasterxml.jackson.core.JsonParseException;
 import edu.illinois.library.cantaloupe.async.TaskQueue;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
@@ -12,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Optional;
 
 /**
  * <p>Used to obtain {@link Info} instances in an efficient way, utilizing
@@ -53,10 +55,13 @@ public final class InfoService {
      *
      * <ol>
      *     <li>An internal {@link ObjectCache}, if enabled by the
-     *     {@link Key#INFO_CACHE_ENABLED} configuration key;</li>
+     *     {@link Key#INFO_CACHE_ENABLED} configuration key</li>
      *     <li>The derivative cache returned by
-     *     {@link CacheFactory#getDerivativeCache()};</li>
+     *     {@link CacheFactory#getDerivativeCache()}</li>
      * </ol>
+     *
+     * <p>If an info exists in a cache but is corrupt, the error is swallowed
+     * and logged and an empty instance is returned.</p>
      *
      * @param identifier   Identifier of the source image for which to retrieve
      *                     the info.
@@ -65,32 +70,36 @@ public final class InfoService {
      *                     from the cache.
      * @see #getOrReadInfo(Identifier, Processor)
      */
-    Info getInfo(final Identifier identifier) throws IOException {
+    Optional<Info> getInfo(final Identifier identifier) throws IOException {
         // Check the info cache.
         Info info = infoCache.get(identifier);
-
         if (info != null) {
             LOGGER.debug("getInfo(): retrieved from {}: {}",
                     infoCache.getClass().getSimpleName(), identifier);
-        } else {
-            // Check the derivative cache.
-            final DerivativeCache derivCache = CacheFactory.getDerivativeCache();
-            if (derivCache != null) {
-                Stopwatch watch = new Stopwatch();
-                info = derivCache.getImageInfo(identifier);
-                if (info != null) {
+            return Optional.of(info);
+        }
+        // Check the derivative cache.
+        final DerivativeCache derivCache =
+                CacheFactory.getDerivativeCache().orElse(null);
+        if (derivCache != null) {
+            Stopwatch watch = new Stopwatch();
+            try {
+                Optional<Info> optInfo = derivCache.getInfo(identifier);
+                if (optInfo.isPresent()) {
                     LOGGER.debug("getInfo(): retrieved info of {} from {} in {}",
                             identifier,
                             derivCache.getClass().getSimpleName(),
                             watch);
-
-                    // Add it to the object cache (which it may already exist
-                    // in, but it doesn't matter).
-                    putInObjectCache(identifier, info);
+                    // Add it to the object cache (where it may already exist,
+                    // but it doesn't matter).
+                    putInObjectCache(identifier, optInfo.get());
                 }
+                return optInfo;
+            } catch (JsonParseException e) {
+                LOGGER.warn("getInfo(): {}", e.getMessage());
             }
         }
-        return info;
+        return Optional.empty();
     }
 
     /**
@@ -116,28 +125,41 @@ public final class InfoService {
      *     asynchronously.)</li>
      * </ol>
      *
+     * <p>If an info exists in a cache but is corrupt, the error is swallowed
+     * and logged.</p>
+     *
      * @param identifier Identifier of the source image for which to retrieve
      *                   the info.
      * @param proc       Processor to use to read the info if necessary.
      * @return           Info for the image with the given identifier.
-     * @throws IOException        If there is an error reading or writing to or
-     *                            from the cache.
+     * @throws IOException if there is an error reading or writing to or from
+     *                   the cache.
      * @see #getInfo(Identifier)
      */
-    Info getOrReadInfo(final Identifier identifier, final Processor proc)
-            throws IOException {
-        // Try to retrieve it from an object or derivative cache.
-        Info info = getInfo(identifier);
-        if (info == null) {
+    Optional<Info> getOrReadInfo(final Identifier identifier,
+                                 final Processor proc) throws IOException {
+        Optional<Info> optInfo = Optional.empty();
+        // Try to retrieve it from a cache. In the (hopefully impossible) event
+        // that it is corrupt and cannot be deserialized, log the problem and
+        // fall back to retrieving it from the processor.
+        try {
+            optInfo = getInfo(identifier);
+        } catch (IOException e) {
+            LOGGER.warn("getOrReadInfo(): {}", e.getMessage());
+        }
+        if (optInfo.isEmpty()) {
             // Read it from the processor and then add it to both the
             // derivative and object caches.
-            info = readInfo(identifier, proc);
+            Info info = readInfo(identifier, proc);
 
             // Add it to the derivative and object caches.
-            final DerivativeCache derivCache = CacheFactory.getDerivativeCache();
+            final DerivativeCache derivCache =
+                    CacheFactory.getDerivativeCache().orElse(null);
             putInCachesAsync(identifier, info, derivCache);
+            optInfo = Optional.of(info);
         }
-        return info;
+        LOGGER.trace("Info for {}: {}", identifier, optInfo.get().toJSON());
+        return optInfo;
     }
 
     boolean isObjectCacheEnabled() {

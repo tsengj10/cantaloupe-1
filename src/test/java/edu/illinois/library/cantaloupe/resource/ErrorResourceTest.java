@@ -1,22 +1,14 @@
 package edu.illinois.library.cantaloupe.resource;
 
 import edu.illinois.library.cantaloupe.http.ResourceException;
-import org.junit.After;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Functional test of error responses.
  */
 public class ErrorResourceTest extends ResourceTest {
-
-    @After
-    public void tearDown() throws Exception {
-        if (client != null) {
-            client.stop();
-        }
-    }
 
     @Override
     protected String getEndpointPath() {
@@ -24,7 +16,7 @@ public class ErrorResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testErrorResponseContentTypeWithHTMLPreference()
+    void testErrorResponseContentTypeWithHTMLPreference()
             throws Exception {
         client = newClient("/bogus");
         client.getHeaders().add("Accept",
@@ -33,14 +25,14 @@ public class ErrorResourceTest extends ResourceTest {
         try {
             client.send();
         } catch (ResourceException e) {
-            assertTrue(e.getResponse().getContentAsString().contains("html>"));
-            assertEquals("text/html;charset=UTF-8",
-                    e.getResponse().getHeaders().get("Content-Type"));
+            assertTrue(e.getResponse().getBodyAsString().contains("html>"));
+            assertTrue("text/html;charset=UTF-8".equalsIgnoreCase(
+                    e.getResponse().getHeaders().getFirstValue("Content-Type")));
         }
     }
 
     @Test
-    public void testErrorResponseContentTypeWithXHTMLPreference()
+    void testErrorResponseContentTypeWithXHTMLPreference()
             throws Exception {
         client = newClient("/bogus");
         client.getHeaders().add("Accept", "application/xhtml+xml;q=0.9");
@@ -48,14 +40,14 @@ public class ErrorResourceTest extends ResourceTest {
         try {
             client.send();
         } catch (ResourceException e) {
-            assertTrue(e.getResponse().getContentAsString().contains("html>"));
-            assertEquals("text/html;charset=UTF-8",
-                    e.getResponse().getHeaders().get("Content-Type"));
+            assertTrue(e.getResponse().getBodyAsString().contains("html>"));
+            assertTrue("text/html;charset=UTF-8".equalsIgnoreCase(
+                    e.getResponse().getHeaders().getFirstValue("Content-Type")));
         }
     }
 
     @Test
-    public void testErrorResponseContentTypeWithXMLPreference()
+    void testErrorResponseContentTypeWithXMLPreference()
             throws Exception {
         client = newClient("/bogus");
         client.getHeaders().add("Accept", "application/xml;q=0.9");
@@ -63,14 +55,14 @@ public class ErrorResourceTest extends ResourceTest {
         try {
             client.send();
         } catch (ResourceException e) {
-            assertFalse(e.getResponse().getContentAsString().contains("html>"));
-            assertEquals("text/plain;charset=UTF-8",
-                    e.getResponse().getHeaders().get("Content-Type"));
+            assertFalse(e.getResponse().getBodyAsString().contains("html>"));
+            assertTrue("text/plain;charset=UTF-8".equalsIgnoreCase(
+                    e.getResponse().getHeaders().getFirstValue("Content-Type")));
         }
     }
 
     @Test
-    public void testErrorResponseContentTypeWithTextPreference()
+    void testErrorResponseContentTypeWithTextPreference()
             throws Exception {
         client = newClient("/bogus");
         client.getHeaders().add("Accept", "text/plain");
@@ -78,14 +70,14 @@ public class ErrorResourceTest extends ResourceTest {
         try {
             client.send();
         } catch (ResourceException e) {
-            assertFalse(e.getResponse().getContentAsString().contains("html>"));
-            assertEquals("text/plain;charset=UTF-8",
-                    e.getResponse().getHeaders().get("Content-Type"));
+            assertFalse(e.getResponse().getBodyAsString().contains("html>"));
+            assertTrue("text/plain;charset=UTF-8".equalsIgnoreCase(
+                    e.getResponse().getHeaders().getFirstValue("Content-Type")));
         }
     }
 
     @Test
-    public void testErrorResponseContentTypeWithNoPreference()
+    void testErrorResponseContentTypeWithNoPreference()
             throws Exception {
         client = newClient("/bogus");
         client.getHeaders().add("Accept", "*/*");
@@ -93,9 +85,9 @@ public class ErrorResourceTest extends ResourceTest {
         try {
             client.send();
         } catch (ResourceException e) {
-            assertFalse(e.getResponse().getContentAsString().contains("html>"));
-            assertEquals("text/plain;charset=UTF-8",
-                    e.getResponse().getHeaders().get("Content-Type"));
+            assertFalse(e.getResponse().getBodyAsString().contains("html>"));
+            assertTrue("text/plain;charset=UTF-8".equalsIgnoreCase(
+                    e.getResponse().getHeaders().getFirstValue("Content-Type")));
         }
     }
 

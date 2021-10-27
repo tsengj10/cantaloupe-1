@@ -2,11 +2,11 @@ package edu.illinois.library.cantaloupe.config;
 
 import edu.illinois.library.cantaloupe.util.StringUtils;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 /**
  * Application configuration. Provides read-only or read-write access to
@@ -97,6 +97,13 @@ public interface Configuration {
      *         to a double.
      */
     double getDouble(String key, double defaultValue);
+
+    /**
+     * Convenience method for accessing the file backing the instance, if any.
+     * For implementations backed by more than one file, the main file is
+     * returned.
+     */
+    Optional<Path> getFile();
 
     /**
      * @see #getFloat(String)
@@ -240,13 +247,11 @@ public interface Configuration {
      * @return Object value corresponding to the given key, or {@literal null}
      *         if not set.
      */
-    @Nullable
-    Object getProperty(@Nonnull String key);
+    Object getProperty(String key);
 
     /**
      * @see #getString(String)
      */
-    @Nullable
     default String getString(Key key) {
         return getString(key.key());
     }
@@ -255,8 +260,7 @@ public interface Configuration {
      * @return String value corresponding to the given key, or {@literal null}
      *         if not set.
      */
-    @Nullable
-    String getString(@Nonnull String key);
+    String getString(String key);
 
     /**
      * @see #getString(String, String)

@@ -2,25 +2,29 @@ package edu.illinois.library.cantaloupe;
 
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
-import edu.illinois.library.cantaloupe.util.SystemUtils;
+import edu.illinois.library.cantaloupe.processor.codec.IIOProviderContextListener;
+import edu.illinois.library.cantaloupe.resource.FileServlet;
+import edu.illinois.library.cantaloupe.resource.HandlerServlet;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.http2.HTTP2Cipher;
 import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
 import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
+import org.eclipse.jetty.jmx.MBeanContainer;
+import org.eclipse.jetty.server.CustomRequestLog;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.server.RequestLog;
 import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.Slf4jRequestLogWriter;
 import org.eclipse.jetty.server.SslConnectionFactory;
+import org.eclipse.jetty.servlet.ListenerHolder;
+import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.eclipse.jetty.webapp.WebAppContext;
+import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Comparator;
+import java.lang.management.ManagementFactory;
 
 /**
  * <p>Provides the embedded Servlet container in standalone mode.</p>
@@ -33,6 +37,7 @@ public class ApplicationServer {
     // have access to a logger.
 
     private static final int IDLE_TIMEOUT = 30000;
+    private static final String REMOTE_JMX_PORT_PARAMETER = "com.sun.management.jmxremote.port";
 
     /**
      * {@literal 0} tells Jetty to use an OS default.
@@ -47,6 +52,19 @@ public class ApplicationServer {
 
     static final int DEFAULT_HTTPS_PORT = 8183;
 
+    /**
+     * Minimum number of threads in the pool. {@literal 8} is the default in
+     * Jetty 9.4.
+     */
+    static final int DEFAULT_MIN_THREADS = 8;
+
+    /**
+     * Maximum number of threads in the pool. {@literal 200} is the default in
+     * Jetty 9.4, but, this being a resource-intensive application, we will
+     * lower that a bit.
+     */
+    static final int DEFAULT_MAX_THREADS = 150;
+
     private int acceptQueueLimit            = DEFAULT_ACCEPT_QUEUE_LIMIT;
     private boolean isHTTPEnabled;
     private String httpHost                 = DEFAULT_HTTP_HOST;
@@ -58,9 +76,9 @@ public class ApplicationServer {
     private String httpsKeyStorePath;
     private String httpsKeyStoreType;
     private int httpsPort                   = DEFAULT_HTTPS_PORT;
-    private boolean isInsecureHTTP2Enabled;
-    private boolean isSecureHTTP2Enabled;
     private boolean isStarted;
+    private int minThreads                  = DEFAULT_MIN_THREADS;
+    private int maxThreads                  = DEFAULT_MAX_THREADS;
     private Server server;
 
     /**
@@ -79,8 +97,6 @@ public class ApplicationServer {
         setHTTPEnabled(config.getBoolean(Key.HTTP_ENABLED, false));
         setHTTPHost(config.getString(Key.HTTP_HOST, DEFAULT_HTTP_HOST));
         setHTTPPort(config.getInt(Key.HTTP_PORT, DEFAULT_HTTP_PORT));
-        setInsecureHTTP2Enabled(
-                config.getBoolean(Key.HTTP_HTTP2_ENABLED, true));
 
         setHTTPSEnabled(config.getBoolean(Key.HTTPS_ENABLED, false));
         setHTTPSHost(config.getString(Key.HTTPS_HOST, DEFAULT_HTTPS_HOST));
@@ -92,63 +108,38 @@ public class ApplicationServer {
         setHTTPSKeyStoreType(
                 config.getString(Key.HTTPS_KEY_STORE_TYPE));
         setHTTPSPort(config.getInt(Key.HTTPS_PORT, DEFAULT_HTTPS_PORT));
-        setSecureHTTP2Enabled(
-                config.getBoolean(Key.HTTPS_HTTP2_ENABLED, true));
-
+        setMaxThreads(config.getInt(Key.HTTP_MAX_THREADS, DEFAULT_MAX_THREADS));
+        setMinThreads(config.getInt(Key.HTTP_MIN_THREADS, DEFAULT_MIN_THREADS));
         setAcceptQueueLimit(config.getInt(Key.HTTP_ACCEPT_QUEUE_LIMIT,
                 DEFAULT_ACCEPT_QUEUE_LIMIT));
     }
 
     private void createServer() {
-        final WebAppContext context = new WebAppContext();
-        context.setContextPath("/");
+        final ServletContextHandler context = new ServletContextHandler(
+                ServletContextHandler.NO_SESSIONS);
 
         // Disable directory listing.
         context.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed",
                 "false");
 
-        // Jetty will extract the app into a temp directory that is, by
-        // default, the same as java.io.tmpdir. The OS may periodically clean
-        // out this directory, which will cause havoc if it happens while the
-        // application is running, so here we can override Jetty's temp
-        // directory location.
-        // See: http://www.eclipse.org/jetty/documentation/current/ref-temporary-directories.html
-        context.setAttribute("org.eclipse.jetty.webapp.basetempdir",
-                Application.getTempPath().toString());
+        context.setContextPath("/");
+        context.addServlet(HandlerServlet.class, "/*");
+        context.addServlet(FileServlet.class, "/static/*");
+        context.getServletHandler().addListener(new ListenerHolder(ApplicationContextListener.class));
+        context.getServletHandler().addListener(new ListenerHolder(IIOProviderContextListener.class));
 
-        // We also set it to NOT persist to avoid accumulating a bunch of
-        // stale exploded apps.
-        // N.B.: WebAppContext.setPersistTempDirectory() is supposed to be the
-        // way to accomplish this, but testing indicates that it does not work
-        // reliably as of Jetty 9.4.9.v20180320, after sending either SIGINT
-        // or SIGTERM. So, we will do it ourselves in a shutdown hook instead.
-        // See: http://www.eclipse.org/jetty/documentation/current/ref-temporary-directories.html#_setting_a_specific_temp_directory
-        //context.setPersistTempDirectory(false);
-        if (!"true".equals(System.getProperty(Application.TEST_VM_ARGUMENT))) {
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                try {
-                    Files.walk(context.getTempDirectory().toPath())
-                            .sorted(Comparator.reverseOrder())
-                            .map(Path::toFile)
-                            .forEach(File::delete);
-                } catch (IOException e) {
-                    System.err.println(e.getMessage());
-                }
-            }));
-        }
+        QueuedThreadPool pool = new QueuedThreadPool(
+                getMaxThreads(), getMinThreads());
 
-        // Give the WebAppContext a different "WAR" to use depending on
-        // whether we are running from a WAR file or an IDE.
-        final String warPath = StandaloneEntry.getWARFile().getAbsolutePath();
-        if (warPath.endsWith(".war")) {
-            context.setWar(warPath);
-        } else {
-            context.setWar("src/main/webapp");
-        }
-
-        server = new Server();
+        server = new Server(pool);
         context.setServer(server);
         server.setHandler(context);
+
+        // This is technically "NCSA Combined" format.
+        RequestLog log = new CustomRequestLog(
+                new Slf4jRequestLogWriter(),
+                CustomRequestLog.EXTENDED_NCSA_FORMAT);
+        server.setRequestLog(log);
     }
 
     public int getAcceptQueueLimit() {
@@ -187,20 +178,20 @@ public class ApplicationServer {
         return httpsPort;
     }
 
+    public int getMaxThreads() {
+        return maxThreads;
+    }
+
+    public int getMinThreads() {
+        return minThreads;
+    }
+
     public boolean isHTTPEnabled() {
         return isHTTPEnabled;
     }
 
     public boolean isHTTPSEnabled() {
         return isHTTPSEnabled;
-    }
-
-    public boolean isInsecureHTTP2Enabled() {
-        return isInsecureHTTP2Enabled;
-    }
-
-    public boolean isSecureHTTP2Enabled() {
-        return isSecureHTTP2Enabled;
     }
 
     public boolean isStarted() {
@@ -255,12 +246,12 @@ public class ApplicationServer {
         this.httpsPort = port;
     }
 
-    public void setInsecureHTTP2Enabled(boolean enabled) {
-        this.isInsecureHTTP2Enabled = enabled;
+    public void setMaxThreads(int maxThreads) {
+        this.maxThreads = maxThreads;
     }
 
-    public void setSecureHTTP2Enabled(boolean enabled) {
-        this.isSecureHTTP2Enabled = enabled;
+    public void setMinThreads(int minThreads) {
+        this.minThreads = minThreads;
     }
 
     /**
@@ -273,18 +264,12 @@ public class ApplicationServer {
             // Initialize the HTTP server, handling both HTTP/1.1 and plaintext
             // HTTP/2.
             if (isHTTPEnabled()) {
-                ServerConnector connector;
                 HttpConfiguration config = new HttpConfiguration();
                 HttpConnectionFactory http1 = new HttpConnectionFactory();
 
-                if (isInsecureHTTP2Enabled()) {
-                    HTTP2CServerConnectionFactory http2 =
-                            new HTTP2CServerConnectionFactory(config);
-                    connector = new ServerConnector(server, http1, http2);
-                } else {
-                    connector = new ServerConnector(server, http1);
-                }
-
+                HTTP2CServerConnectionFactory http2 =
+                        new HTTP2CServerConnectionFactory(config);
+                ServerConnector connector = new ServerConnector(server, http1, http2);
                 connector.setHost(getHTTPHost());
                 connector.setPort(getHTTPPort());
                 connector.setIdleTimeout(IDLE_TIMEOUT);
@@ -293,8 +278,6 @@ public class ApplicationServer {
             }
 
             // Initialize the HTTPS server.
-            // N.B.: HTTP/2 requires ALPN, which requires Java 9.
-            // https://www.eclipse.org/jetty/documentation/9.3.x/alpn-chapter.html
             if (isHTTPSEnabled()) {
                 HttpConfiguration config = new HttpConfiguration();
                 config.setSecureScheme("https");
@@ -303,43 +286,31 @@ public class ApplicationServer {
 
                 final SslContextFactory contextFactory = new SslContextFactory.Server();
                 contextFactory.setKeyStorePath(getHTTPSKeyStorePath());
-                contextFactory.setKeyStorePassword(getHTTPSKeyStorePassword());
-                contextFactory.setKeyManagerPassword(getHTTPSKeyPassword());
-
-                ServerConnector connector = null;
-
-                if (isSecureHTTP2Enabled()) {
-                    if (SystemUtils.isALPNAvailable()) {
-                        HttpConnectionFactory http1 =
-                                new HttpConnectionFactory(config);
-                        HTTP2ServerConnectionFactory http2 =
-                                new HTTP2ServerConnectionFactory(config);
-
-                        ALPNServerConnectionFactory alpn =
-                                new ALPNServerConnectionFactory();
-                        alpn.setDefaultProtocol(http1.getProtocol());
-
-                        contextFactory.setCipherComparator(HTTP2Cipher.COMPARATOR);
-                        contextFactory.setUseCipherSuitesOrder(true);
-
-                        SslConnectionFactory connectionFactory =
-                                new SslConnectionFactory(contextFactory,
-                                        alpn.getProtocol());
-
-                        connector = new ServerConnector(server,
-                                connectionFactory, alpn, http2, http1);
-                    } else {
-                        System.err.println(getClass().getSimpleName() +
-                                ".start(): unable to initialize secure " +
-                                "HTTP/2 (JRE <9 or no ALPN JAR on boot classpath)");
-                    }
+                if (getHTTPSKeyStorePassword() != null) {
+                    contextFactory.setKeyStorePassword(getHTTPSKeyStorePassword());
+                }
+                if (getHTTPSKeyPassword() != null) {
+                    contextFactory.setKeyManagerPassword(getHTTPSKeyPassword());
                 }
 
-                if (connector == null) { // Fall back to HTTP/1.1.
-                    connector = new ServerConnector(server,
-                            new SslConnectionFactory(contextFactory, "HTTP/1.1"),
-                            new HttpConnectionFactory(config));
-                }
+                HttpConnectionFactory http1 =
+                        new HttpConnectionFactory(config);
+                HTTP2ServerConnectionFactory http2 =
+                        new HTTP2ServerConnectionFactory(config);
+
+                ALPNServerConnectionFactory alpn =
+                        new ALPNServerConnectionFactory();
+                alpn.setDefaultProtocol(http1.getProtocol());
+
+                contextFactory.setCipherComparator(HTTP2Cipher.COMPARATOR);
+                contextFactory.setUseCipherSuitesOrder(true);
+
+                SslConnectionFactory connectionFactory =
+                        new SslConnectionFactory(contextFactory,
+                                alpn.getProtocol());
+
+                ServerConnector connector = new ServerConnector(server,
+                        connectionFactory, alpn, http2, http1);
 
                 connector.setHost(getHTTPSHost());
                 connector.setPort(getHTTPSPort());
@@ -347,6 +318,15 @@ public class ApplicationServer {
                 connector.setAcceptQueueSize(getAcceptQueueLimit());
                 server.addConnector(connector);
             }
+
+            // If the Cantaloupe server is started with jmxremote, add the Jetty
+            // jmx extensions to the MBeanServer
+            if (System.getProperties().containsKey(REMOTE_JMX_PORT_PARAMETER) &&
+                    !"".equals(System.getProperty(REMOTE_JMX_PORT_PARAMETER))) {
+                MBeanContainer mbeanContainer = new MBeanContainer(ManagementFactory.getPlatformMBeanServer());
+                server.addBean(mbeanContainer);
+            }
+
             server.start();
             isStarted = true;
         }

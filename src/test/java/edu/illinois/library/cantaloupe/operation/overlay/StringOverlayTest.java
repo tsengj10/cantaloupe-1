@@ -4,97 +4,111 @@ import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.Color;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.awt.Font;
 import java.awt.font.TextAttribute;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class StringOverlayTest extends BaseTest {
 
     private StringOverlay instance;
 
-    private Font newFont() {
+    private Font newFont(Float weight, Float tracking) {
         final Map<TextAttribute, Object> attributes = new HashMap<>();
         attributes.put(TextAttribute.FAMILY, "SansSerif");
         attributes.put(TextAttribute.SIZE, 12);
-        attributes.put(TextAttribute.WEIGHT, 2.0f);
-        attributes.put(TextAttribute.TRACKING, 0.1f);
+        attributes.put(TextAttribute.WEIGHT, weight);
+        attributes.put(TextAttribute.TRACKING, tracking);
         return Font.getFont(attributes);
     }
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-
         instance = new StringOverlay("cats", Position.BOTTOM_RIGHT, 5,
-                newFont(), 11, Color.BLUE, Color.ORANGE, Color.RED, 5f);
+                newFont(2.0f,  0.1f), 11, Color.BLUE, Color.ORANGE, Color.RED,
+                5f, false);
     }
 
     @Test
-    public void hasEffect() {
+    void hasEffect() {
         assertTrue(instance.hasEffect());
         instance.setString("");
         assertFalse(instance.hasEffect());
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void setBackgroundColorThrowsExceptionWhenFrozen() {
+    @Test
+    void setBackgroundColorThrowsExceptionWhenFrozen() {
         instance.freeze();
-        instance.setBackgroundColor(Color.RED);
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void setColorThrowsExceptionWhenFrozen() {
-        instance.freeze();
-        instance.setColor(Color.RED);
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void setFontThrowsExceptionWhenFrozen() {
-        instance.freeze();
-        instance.setFont(newFont());
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void setMinSizeThrowsExceptionWhenFrozen() {
-        instance.freeze();
-        instance.setMinSize(1);
+        assertThrows(IllegalStateException.class,
+                () -> instance.setBackgroundColor(Color.RED));
     }
 
     @Test
-    public void setStringReplacesNewlines() {
+    void setColorThrowsExceptionWhenFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.setColor(Color.RED));
+    }
+
+    @Test
+    void setFontThrowsExceptionWhenFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.setFont(newFont(2.0f,  0.1f)));
+    }
+
+    @Test
+    void setMinSizeThrowsExceptionWhenFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class, () -> instance.setMinSize(1));
+    }
+
+    @Test
+    void setStringThrowsExceptionWhenFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class, () -> instance.setString(""));
+    }
+
+    @Test
+    void setStringReplacesNewlines() {
         instance.setString("test\\ntest");
         assertEquals("test\ntest", instance.getString());
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void setStringThrowsExceptionWhenFrozen() {
+    @Test
+    void setStrokeColorThrowsExceptionWhenFrozen() {
         instance.freeze();
-        instance.setString("");
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void setStrokeColorThrowsExceptionWhenFrozen() {
-        instance.freeze();
-        instance.setStrokeColor(Color.RED);
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void setStrokeWidthThrowsExceptionWhenFrozen() {
-        instance.freeze();
-        instance.setStrokeWidth(3);
+        assertThrows(IllegalStateException.class,
+                () -> instance.setStrokeColor(Color.RED));
     }
 
     @Test
-    public void toMap() {
+    void setStrokeWidthThrowsExceptionWhenFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.setStrokeWidth(3));
+    }
+
+    @Test
+    void setWordWrapThrowsExceptionWhenFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.setWordWrap(true));
+    }
+
+    @Test
+    void toMap() {
         Dimension fullSize = new Dimension(100, 100);
         ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
         Map<String,Object> map = instance.toMap(fullSize, scaleConstraint);
+
+        assertEquals(13, map.size());
         assertEquals(instance.getClass().getSimpleName(), map.get("class"));
         assertEquals(instance.getBackgroundColor().toRGBAHex(),
                 map.get("background_color"));
@@ -111,20 +125,34 @@ public class StringOverlayTest extends BaseTest {
         assertEquals(instance.getStrokeColor().toRGBAHex(),
                 map.get("stroke_color"));
         assertEquals(5f, map.get("stroke_width"));
-    }
-
-    @Test(expected = UnsupportedOperationException.class)
-    public void toMapReturnsUnmodifiableMap() {
-        Dimension fullSize = new Dimension(100, 100);
-        ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
-        Map<String,Object> map = instance.toMap(fullSize, scaleConstraint);
-        map.put("test", "test");
+        assertEquals(false, map.get("word_wrap"));
     }
 
     @Test
-    public void testToString() {
+    void toMapReturnsDefaultValueForMissingFontAttributes() {
+        Dimension fullSize = new Dimension(100, 100);
+        ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+        StringOverlay fontModifiedInstance = new StringOverlay("cats",
+                Position.BOTTOM_RIGHT, 5, newFont(null,  null), 11,
+                Color.BLUE, Color.ORANGE, Color.RED, 5f, false);
+        Map<String,Object> map = fontModifiedInstance.toMap(fullSize, scaleConstraint);
+        assertEquals(TextAttribute.WEIGHT_REGULAR, map.get("font_weight"));
+        assertEquals(0.0f, map.get("glyph_spacing"));
+    }
+
+    @Test
+    void toMapReturnsUnmodifiableMap() {
+        Dimension fullSize = new Dimension(100, 100);
+        ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+        Map<String,Object> map = instance.toMap(fullSize, scaleConstraint);
+        assertThrows(UnsupportedOperationException.class,
+                () -> map.put("test", "test"));
+    }
+
+    @Test
+    void testToString() {
         instance.setString("DOGSdogs123!@#$%\n%^&*()");
-        assertEquals("801774c691b35cbd89e3bd8cb6803681_SE_5_SansSerif_12_2.0_0.1_#0000FFFF_#FFA500FF_#FF0000FF_5.0",
+        assertEquals("801774c691b35cbd89e3bd8cb6803681_SE_5_SansSerif_12_2.0_0.1_#0000FFFF_#FFA500FF_#FF0000FF_5.0_false",
                 instance.toString());
     }
 

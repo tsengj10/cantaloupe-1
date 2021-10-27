@@ -1,9 +1,15 @@
 package edu.illinois.library.cantaloupe.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 
 public final class ConfigurationFactory {
+
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(ConfigurationFactory.class);
 
     public static final String CONFIG_VM_ARGUMENT = "cantaloupe.config";
 
@@ -23,8 +29,8 @@ public final class ConfigurationFactory {
      * be empty).
      *
      * @return Shared application configuration instance.
-     * @throws RuntimeException If the {@link #CONFIG_VM_ARGUMENT} VM argument
-     *                          is not set.
+     * @throws MissingConfigurationException if the {@link #CONFIG_VM_ARGUMENT}
+     *         VM argument is not set.
      */
     static synchronized Configuration getInstance() {
         if (instance == null) {
@@ -46,16 +52,15 @@ public final class ConfigurationFactory {
                         break;
                 }
             } else {
-                throw new RuntimeException(
-                        "Missing " + CONFIG_VM_ARGUMENT + " VM option.");
+                throw new MissingConfigurationException(
+                        "Missing " + CONFIG_VM_ARGUMENT + " VM argument.");
             }
 
             configs.forEach(c -> {
                 try {
                     c.reload();
                 } catch (Exception e) {
-                    System.err.println("ConfigurationFactory.getInstance(): " +
-                            e.getMessage());
+                    LOGGER.error("getInstance(): {}", e.getMessage(), e);
                 }
             });
             instance = new ConfigurationProvider(configs);

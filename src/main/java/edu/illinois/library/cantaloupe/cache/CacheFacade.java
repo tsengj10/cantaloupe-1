@@ -10,8 +10,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * Simplified interface to the caching architecture.
@@ -26,22 +26,22 @@ public final class CacheFacade {
      */
     public void cleanUp() throws IOException {
         // Clean up the derivative cache.
-        DerivativeCache derivativeCache = getDerivativeCache();
-        if (derivativeCache != null) {
-            derivativeCache.cleanUp();
+        Optional<DerivativeCache> optDerivativeCache = getDerivativeCache();
+        if (optDerivativeCache.isPresent()) {
+            optDerivativeCache.get().cleanUp();
         }
 
         // Clean up the source cache.
-        SourceCache sourceCache = getSourceCache();
-        if (sourceCache != null) {
-            sourceCache.cleanUp();
+        Optional<SourceCache> optSourceCache = getSourceCache();
+        if (optSourceCache.isPresent()) {
+            optSourceCache.get().cleanUp();
         }
     }
 
     /**
      * @see CacheFactory#getDerivativeCache
      */
-    public DerivativeCache getDerivativeCache() {
+    public Optional<DerivativeCache> getDerivativeCache() {
         return CacheFactory.getDerivativeCache();
     }
 
@@ -51,7 +51,7 @@ public final class CacheFacade {
      *
      * @see #getOrReadInfo(Identifier, Processor)
      */
-    public Info getInfo(Identifier identifier) throws IOException {
+    public Optional<Info> getInfo(Identifier identifier) throws IOException {
         return InfoService.getInstance().getInfo(identifier);
     }
 
@@ -62,35 +62,36 @@ public final class CacheFacade {
      *
      * @see #getInfo(Identifier)
      */
-    public Info getOrReadInfo(Identifier identifier, Processor processor)
-            throws IOException {
+    public Optional<Info> getOrReadInfo(Identifier identifier,
+                                        Processor processor) throws IOException {
         return InfoService.getInstance().getOrReadInfo(identifier, processor);
     }
 
     /**
      * @see CacheFactory#getSourceCache
      */
-    public SourceCache getSourceCache() {
+    public Optional<SourceCache> getSourceCache() {
         return CacheFactory.getSourceCache();
     }
 
     /**
      * @param identifier Image identifier.
-     * @return           Path of a file corresponding to the given identifier
-     *                   in the source cache, or {@literal null} if none
+     * @return           Path of a valid file corresponding to the given
+     *                   identifier in the source cache, or empty if none
      *                   exists.
      * @see SourceCache#getSourceImageFile(Identifier)
      */
-    public Path getSourceCacheFile(Identifier identifier) throws IOException {
-        SourceCache sourceCache = getSourceCache();
-        if (sourceCache != null) {
-            return sourceCache.getSourceImageFile(identifier);
+    public Optional<Path> getSourceCacheFile(Identifier identifier)
+            throws IOException {
+        Optional<SourceCache> optSourceCache = getSourceCache();
+        if (optSourceCache.isPresent()) {
+            return optSourceCache.get().getSourceImageFile(identifier);
         }
-        return null;
+        return Optional.empty();
     }
 
     public boolean isDerivativeCacheAvailable() {
-        return getDerivativeCache() != null;
+        return getDerivativeCache().isPresent();
     }
 
     public boolean isInfoCacheAvailable() {
@@ -102,9 +103,9 @@ public final class CacheFacade {
      */
     public InputStream newDerivativeImageInputStream(OperationList opList)
             throws IOException {
-        DerivativeCache derivativeCache = getDerivativeCache();
-        if (derivativeCache != null) {
-            return derivativeCache.newDerivativeImageInputStream(opList);
+        Optional<DerivativeCache> optCache = getDerivativeCache();
+        if (optCache.isPresent()) {
+            return optCache.get().newDerivativeImageInputStream(opList);
         }
         return null;
     }
@@ -112,11 +113,11 @@ public final class CacheFacade {
     /**
      * @see DerivativeCache#newDerivativeImageOutputStream(OperationList)
      */
-    public OutputStream newDerivativeImageOutputStream(OperationList opList)
+    public CompletableOutputStream newDerivativeImageOutputStream(OperationList opList)
             throws IOException {
-        DerivativeCache derivativeCache = getDerivativeCache();
-        if (derivativeCache != null) {
-            return derivativeCache.newDerivativeImageOutputStream(opList);
+        Optional<DerivativeCache> optCache = getDerivativeCache();
+        if (optCache.isPresent()) {
+            return optCache.get().newDerivativeImageOutputStream(opList);
         }
         return null;
     }
@@ -129,15 +130,15 @@ public final class CacheFacade {
         InfoService.getInstance().purgeObjectCache();
 
         // Purge the derivative cache.
-        DerivativeCache derivativeCache = getDerivativeCache();
-        if (derivativeCache != null) {
-            derivativeCache.purge();
+        Optional<DerivativeCache> optDerivativeCache = getDerivativeCache();
+        if (optDerivativeCache.isPresent()) {
+            optDerivativeCache.get().purge();
         }
 
         // Purge the source cache.
-        SourceCache sourceCache = getSourceCache();
-        if (sourceCache != null) {
-            sourceCache.purge();
+        Optional<SourceCache> optSourceCache = getSourceCache();
+        if (optSourceCache.isPresent()) {
+            optSourceCache.get().purge();
         }
     }
 
@@ -149,15 +150,15 @@ public final class CacheFacade {
         InfoService.getInstance().purgeObjectCache(identifier);
 
         // Purge it from the derivative cache.
-        DerivativeCache derivativeCache = getDerivativeCache();
-        if (derivativeCache != null) {
-            derivativeCache.purge(identifier);
+        Optional<DerivativeCache> optDerivativeCache = getDerivativeCache();
+        if (optDerivativeCache.isPresent()) {
+            optDerivativeCache.get().purge(identifier);
         }
 
         // Purge it from the source cache.
-        SourceCache sourceCache = getSourceCache();
-        if (sourceCache != null) {
-            sourceCache.purge(identifier);
+        Optional<SourceCache> optSourceCache = getSourceCache();
+        if (optSourceCache.isPresent()) {
+            optSourceCache.get().purge(identifier);
         }
     }
 
@@ -179,26 +180,26 @@ public final class CacheFacade {
      * @see DerivativeCache#purge(OperationList)
      */
     public void purge(OperationList opList) throws IOException {
-        DerivativeCache derivativeCache = getDerivativeCache();
-        if (derivativeCache != null) {
-            derivativeCache.purge(opList);
+        Optional<DerivativeCache> optCache = getDerivativeCache();
+        if (optCache.isPresent()) {
+            optCache.get().purge(opList);
         }
     }
 
     /**
      * @see Cache#purgeInvalid
      */
-    public void purgeExpired() throws IOException {
+    public void purgeInvalid() throws IOException {
         // Purge the derivative cache.
-        DerivativeCache derivativeCache = getDerivativeCache();
-        if (derivativeCache != null) {
-            derivativeCache.purgeInvalid();
+        Optional<DerivativeCache> optDerivativeCache = getDerivativeCache();
+        if (optDerivativeCache.isPresent()) {
+            optDerivativeCache.get().purgeInvalid();
         }
 
         // Purge the source cache.
-        SourceCache sourceCache = getSourceCache();
-        if (sourceCache != null) {
-            sourceCache.purgeInvalid();
+        Optional<SourceCache> optSourceCache = getSourceCache();
+        if (optSourceCache.isPresent()) {
+            optSourceCache.get().purgeInvalid();
         }
     }
 

@@ -1,25 +1,14 @@
 package edu.illinois.library.cantaloupe.processor;
 
 import edu.illinois.library.cantaloupe.image.Format;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
+import edu.illinois.library.cantaloupe.source.PathStreamFactory;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import java.util.EnumSet;
-import java.util.Set;
+import static org.junit.jupiter.api.Assertions.*;
 
-import static org.junit.Assert.*;
-
-public class JaiProcessorTest extends ImageIOProcessorTest {
-
-    private JaiProcessor instance;
-
-    @Before
-    public void setUp() throws Exception {
-        super.setUp();
-        instance = newInstance();
-    }
+@SuppressWarnings("deprecation")
+public class JaiProcessorTest extends AbstractImageIOProcessorTest {
 
     @Override
     protected JaiProcessor newInstance() {
@@ -27,39 +16,47 @@ public class JaiProcessorTest extends ImageIOProcessorTest {
     }
 
     @Test
-    public void testGetSupportedFeatures() throws Exception {
-        instance.setSourceFormat(getAnySupportedSourceFormat(instance));
-
-        Set<ProcessorFeature> expectedFeatures = EnumSet.of(
-                ProcessorFeature.MIRRORING,
-                ProcessorFeature.REGION_BY_PERCENT,
-                ProcessorFeature.REGION_BY_PIXELS,
-                ProcessorFeature.REGION_SQUARE,
-                ProcessorFeature.ROTATION_ARBITRARY,
-                ProcessorFeature.ROTATION_BY_90S,
-                ProcessorFeature.SIZE_ABOVE_FULL,
-                ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_HEIGHT,
-                ProcessorFeature.SIZE_BY_PERCENT,
-                ProcessorFeature.SIZE_BY_WIDTH,
-                ProcessorFeature.SIZE_BY_WIDTH_HEIGHT);
-        assertEquals(expectedFeatures, instance.getSupportedFeatures());
+    void testIsSeekingWithNonSeekableSource() throws Exception {
+        try (StreamProcessor instance = newInstance()) {
+            instance.setSourceFormat(Format.get("bmp"));
+            instance.setStreamFactory(new PathStreamFactory(TestUtil.getImage("bmp")));
+            assertFalse(instance.isSeeking());
+        }
     }
 
     @Test
-    public void testIsSeekingWithNonSeekableSource() throws Exception {
-        instance.setSourceFormat(Format.BMP);
-        instance.setSourceFile(TestUtil.getImage("bmp"));
-        assertFalse(instance.isSeeking());
+    void testIsSeekingWithSeekableSource() throws Exception {
+        try (StreamProcessor instance = newInstance()) {
+            instance.setSourceFormat(Format.get("tif"));
+            instance.setStreamFactory(new PathStreamFactory(TestUtil.getImage("tif-rgb-1res-64x56x8-tiled-jpeg.tif")));
+            assertTrue(instance.isSeeking());
+        }
     }
 
     @Test
-    public void testIsSeekingWithSeekableSource() throws Exception {
-        instance.setSourceFormat(Format.TIF);
-        instance.setSourceFile(TestUtil.getImage("tif-rgb-1res-64x56x8-tiled-jpeg.tif"));
-        assertTrue(instance.isSeeking());
+    @Override
+    public void testProcessWithTurboJPEGAvailable() {
+        // This processor doesn't use TurboJPEG ever.
+    }
+
+    @Test
+    @Override
+    public void testProcessWithTurboJPEGNotAvailable() {
+        // This processor doesn't use TurboJPEG ever.
+    }
+
+    @Test
+    void testSupportsSourceFormatWithSupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertTrue(instance.supportsSourceFormat(Format.get("jpg")));
+        }
+    }
+
+    @Test
+    void testSupportsSourceFormatWithUnsupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertFalse(instance.supportsSourceFormat(Format.get("mp4")));
+        }
     }
 
 }

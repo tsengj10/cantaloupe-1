@@ -8,7 +8,6 @@ import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.util.StringUtils;
-import org.apache.commons.io.output.NullOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.RejectedExecutionException;
@@ -71,7 +71,7 @@ class HeapCache implements DerivativeCache {
      */
     static class Item {
 
-        private byte[] data;
+        private final byte[] data;
 
         Item(byte[] data) {
             this.data = data;
@@ -89,7 +89,7 @@ class HeapCache implements DerivativeCache {
      */
     static class Key implements Comparable<Key> {
 
-        private String imageId;
+        private final String imageId;
         private String opList;
         private long lastAccessedTime;
 
@@ -171,10 +171,10 @@ class HeapCache implements DerivativeCache {
     /**
      * Buffers written data and adds it to the cache upon closure.
      */
-    private class HeapCacheOutputStream extends OutputStream {
+    private class HeapCacheOutputStream extends CompletableOutputStream {
 
-        private OperationList opList;
-        private ByteArrayOutputStream wrappedStream =
+        private final OperationList opList;
+        private final ByteArrayOutputStream wrappedStream =
                 new ByteArrayOutputStream();
 
         HeapCacheOutputStream(OperationList opList) {
@@ -184,9 +184,11 @@ class HeapCache implements DerivativeCache {
         @Override
         public void close() throws IOException {
             LOGGER.debug("Closing stream for {}", opList);
-            Key key = itemKey(opList);
-            Item item = new Item(wrappedStream.toByteArray());
-            cache.put(key, item);
+            if (isCompletelyWritten()) {
+                Key key = itemKey(opList);
+                Item item = new Item(wrappedStream.toByteArray());
+                cache.put(key, item);
+            }
             try {
                 super.close();
             } finally {
@@ -240,7 +242,7 @@ class HeapCache implements DerivativeCache {
                         return;
                     }
                 } else {
-                    logger.info("run(): stopping");
+                    logger.debug("run(): stopping");
                     return;
                 }
             }
@@ -288,10 +290,11 @@ class HeapCache implements DerivativeCache {
                 // Iterate over the cache keys and add cache values one-by-one to
                 // the protobuf cache, removing them from the cache along the way
                 // to save memory.
-                final Iterator<Key> it = cache.keySet().iterator();
+                final Iterator<Map.Entry<Key,Item>> it = cache.entrySet().iterator();
                 while (it.hasNext()) {
-                    final Key key = it.next();
-                    final Item item = cache.get(key);
+                    final Map.Entry<Key,Item> entry = it.next();
+                    final Key key                   = entry.getKey();
+                    final Item item                 = entry.getValue();
                     if (key.getOperationList() != null) { // it's an image
                         final HeapCacheProtos.Image image =
                                 HeapCacheProtos.Image.newBuilder()
@@ -306,17 +309,15 @@ class HeapCache implements DerivativeCache {
                                 HeapCacheProtos.Info.newBuilder()
                                         .setLastAccessed(key.getLastAccessedTime())
                                         .setIdentifier(key.getIdentifier())
-                                        .setJson(new String(item.getData(), "UTF-8"))
+                                        .setJson(new String(item.getData(), StandardCharsets.UTF_8))
                                         .build();
                         cacheBuilder.addInfo(info);
                     }
                     it.remove();
                 }
-
                 try (OutputStream fos = Files.newOutputStream(path)) {
                     cacheBuilder.build().writeTo(fos);
                 }
-
                 LOGGER.debug("Dumped {} items ({} bytes)", size, byteSize);
             } else {
                 throw new IOException("dumpToPersistentStore(): " +
@@ -351,15 +352,14 @@ class HeapCache implements DerivativeCache {
     }
 
     @Override
-    public Info getImageInfo(Identifier identifier) throws IOException {
-        Info info = null;
+    public Optional<Info> getInfo(Identifier identifier) throws IOException {
         Item item = get(itemKey(identifier));
         if (item != null) {
-            LOGGER.debug("getImageInfo(): hit for {}", identifier);
-
-            info = Info.fromJSON(new String(item.getData(), StandardCharsets.UTF_8));
+            LOGGER.debug("getInfo(): hit for {}", identifier);
+            Info info = Info.fromJSON(new String(item.getData(), StandardCharsets.UTF_8));
+            return Optional.of(info);
         }
-        return info;
+        return Optional.empty();
     }
 
     private List<Key> getKeysSortedByLastAccessedTime() {
@@ -493,7 +493,7 @@ class HeapCache implements DerivativeCache {
                             e.getMessage());
                 }
             } else {
-                LOGGER.info("loadFromPersistentStore(): does not exist: {}", path);
+                LOGGER.debug("loadFromPersistentStore(): does not exist: {}", path);
             }
         }
     }
@@ -508,15 +508,16 @@ class HeapCache implements DerivativeCache {
     }
 
     @Override
-    public OutputStream newDerivativeImageOutputStream(OperationList opList) {
+    public CompletableOutputStream
+    newDerivativeImageOutputStream(OperationList opList) {
         final Key key = itemKey(opList);
         final Item item = cache.get(key);
         if (item != null) {
-            LOGGER.info("newDerivativeImageOutputStream(): hit for {}", opList);
+            LOGGER.debug("newDerivativeImageOutputStream(): hit for {}", opList);
             touch(item);
-            return new NullOutputStream();
+            return new CompletableNullOutputStream();
         } else {
-            LOGGER.info("newDerivativeImageOutputStream(): miss; caching {}",
+            LOGGER.debug("newDerivativeImageOutputStream(): miss; caching {}",
                     opList);
             isDirty.lazySet(true);
             return new HeapCacheOutputStream(opList);
@@ -524,21 +525,35 @@ class HeapCache implements DerivativeCache {
     }
 
     @Override
+    public void onCacheWorker() {
+        DerivativeCache.super.onCacheWorker();
+
+        if (isPersistenceEnabled()) {
+            try {
+                dumpToPersistentStore();
+            } catch (IOException e) {
+                LOGGER.error("onCacheWorker(): {}", e.getMessage(), e);
+            }
+        }
+
+    }
+
+    @Override
     public void purge() {
-        LOGGER.info("purge(): purging {} items", cache.size());
+        LOGGER.debug("purge(): purging {} items", cache.size());
         cache.clear();
     }
 
     @Override
     public void purge(Identifier identifier) {
-        LOGGER.info("purge(Identifier): purging {}...", identifier);
+        LOGGER.debug("purge(Identifier): purging {}...", identifier);
         final String imageId = itemKey(identifier).getIdentifier();
         cache.keySet().removeIf(k -> k.getIdentifier().equals(imageId));
     }
 
     @Override
     public void purge(OperationList opList) {
-        LOGGER.info("purge(OperationList): purging {}...", opList.toString());
+        LOGGER.debug("purge(OperationList): purging {}...", opList.toString());
         cache.remove(itemKey(opList));
     }
 
@@ -569,7 +584,7 @@ class HeapCache implements DerivativeCache {
                     }
                 }
                 isDirty.lazySet(true);
-                LOGGER.info("purgeExcess(): purged {} items ({} bytes)",
+                LOGGER.debug("purgeExcess(): purged {} items ({} bytes)",
                         purgedItems, purgedSize);
             }
         }
@@ -580,18 +595,31 @@ class HeapCache implements DerivativeCache {
      */
     @Override
     public void purgeInvalid() {
-        LOGGER.info("purgeInvalid() is not supported by this cache; aborting");
+        LOGGER.debug("purgeInvalid() is not supported by this cache; aborting");
     }
 
     @Override
-    public void put(Identifier identifier, Info imageInfo) throws IOException {
-        LOGGER.info("put(): caching info for {}", identifier);
+    public void put(Identifier identifier, Info info) throws IOException {
+        if (!info.isPersistable()) {
+            LOGGER.debug("put(): info for {} is incomplete; ignoring",
+                    identifier);
+            return;
+        }
+        LOGGER.debug("put(): caching info for {}", identifier);
         isDirty.lazySet(true);
-        Key key = itemKey(identifier);
-
+        Key key   = itemKey(identifier);
         // Rather than storing the info instance itself, we store its JSON
         // serialization, mainly in order to be able to easily get its size.
-        Item item = new Item(imageInfo.toJSON().getBytes("UTF-8"));
+        Item item = new Item(info.toJSON().getBytes(StandardCharsets.UTF_8));
+        cache.putIfAbsent(key, item);
+    }
+
+    @Override
+    public void put(Identifier identifier, String info) throws IOException {
+        LOGGER.debug("put(): caching info for {}", identifier);
+        isDirty.lazySet(true);
+        Key key   = itemKey(identifier);
+        Item item = new Item(info.getBytes(StandardCharsets.UTF_8));
         cache.putIfAbsent(key, item);
     }
 
@@ -627,7 +655,7 @@ class HeapCache implements DerivativeCache {
         cache.entrySet().parallelStream()
                 .filter(entry -> Objects.equals(entry.getValue(), item))
                 .map(Map.Entry::getKey)
-                .collect(Collectors.toSet()).forEach(Key::touch);
+                .collect(Collectors.toUnmodifiableSet()).forEach(Key::touch);
     }
 
 }

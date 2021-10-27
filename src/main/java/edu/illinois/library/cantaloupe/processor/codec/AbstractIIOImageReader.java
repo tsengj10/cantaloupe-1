@@ -1,22 +1,22 @@
 package edu.illinois.library.cantaloupe.processor.codec;
 
-import edu.illinois.library.cantaloupe.config.Configuration;
-import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Dimension;
+import edu.illinois.library.cantaloupe.image.MediaType;
 import edu.illinois.library.cantaloupe.image.Rectangle;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.Crop;
 import edu.illinois.library.cantaloupe.image.Format;
-import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.operation.CropByPercent;
-import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
-import edu.illinois.library.cantaloupe.processor.UnsupportedSourceFormatException;
+import edu.illinois.library.cantaloupe.operation.ScaleByPercent;
+import edu.illinois.library.cantaloupe.operation.ScaleByPixels;
+import edu.illinois.library.cantaloupe.processor.SourceFormatException;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
 import edu.illinois.library.cantaloupe.source.stream.ClosingMemoryCacheImageInputStream;
 import org.slf4j.Logger;
 
+import javax.imageio.IIOException;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.stream.ImageInputStream;
@@ -25,59 +25,69 @@ import java.awt.image.RenderedImage;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
 /**
- * Abstract reader that supplies some base functionality and tries to be
- * efficient with most formats. Format-specific readers may override what they
- * need to.
+ * Supplies some base functionality and tries to be efficient with most
+ * formats. Format-specific readers may override what they need to.
  */
-abstract class AbstractIIOImageReader {
+public abstract class AbstractIIOImageReader {
 
     /**
      * Assigned by {@link #createReader()}.
      */
-    javax.imageio.ImageReader iioReader;
+    protected javax.imageio.ImageReader iioReader;
 
     /**
      * Set by {@link #setSource}.
      */
-    ImageInputStream inputStream;
+    protected ImageInputStream inputStream;
 
     /**
      * Set by {@link #setSource}. May be {@literal null}.
      */
-    Object source;
+    protected Object source;
+
+    protected static void handle(IIOException e) throws IOException {
+        // Image I/O ImageReaders don't distinguish between errors resulting
+        // from an incompatible format and other kinds of errors, so we have to
+        // check message strings, which are plugin-specific.
+        if (e.getMessage().startsWith("Unexpected block type") ||
+                e.getMessage().startsWith("I/O error reading PNG header") ||
+                e.getMessage().startsWith("Not a JPEG file") ||
+                (e.getCause() != null &&
+                        e.getCause().getMessage() != null &&
+                        (e.getCause().getMessage().startsWith("Invalid magic value") ||
+                                e.getCause().getMessage().equals("I/O error reading PNG header!")))) {
+            throw new SourceFormatException();
+        }
+        throw e;
+    }
 
     private List<javax.imageio.ImageReader> availableIIOReaders() {
-        final Iterator<javax.imageio.ImageReader> it;
+        Iterator<javax.imageio.ImageReader> it = null;
         if (getFormat() != null) {
-            it = ImageIO.getImageReadersByMIMEType(
-                    getFormat().getPreferredMediaType().toString());
+            // Search by media type.
+            Iterator<MediaType> types = getFormat().getMediaTypes().iterator();
+            while (types.hasNext() && (it == null || !it.hasNext())) {
+                it = ImageIO.getImageReadersByMIMEType(types.next().toString());
+            }
+            // Search by extension.
+            Iterator<String> extensions = getFormat().getExtensions().iterator();
+            while (extensions.hasNext() && (it == null || !it.hasNext())) {
+                it = ImageIO.getImageReadersBySuffix(extensions.next());
+            }
         } else {
             it = ImageIO.getImageReaders(inputStream);
         }
 
         final List<javax.imageio.ImageReader> iioReaders = new ArrayList<>();
-        while (it.hasNext()) {
+        while (it != null && it.hasNext()) {
             iioReaders.add(it.next());
         }
         return iioReaders;
-    }
-
-    /**
-     * @return Whether metadata can be skipped when reading.
-     */
-    private boolean canIgnoreMetadata() {
-        final Configuration config = Configuration.getInstance();
-        final boolean preserveMetadata = config.getBoolean(
-                Key.PROCESSOR_PRESERVE_METADATA, false);
-        final boolean respectOrientation = config.getBoolean(
-                Key.PROCESSOR_RESPECT_ORIENTATION, false);
-        return (!preserveMetadata && !respectOrientation);
     }
 
     abstract public boolean canSeek();
@@ -91,23 +101,9 @@ abstract class AbstractIIOImageReader {
 
         if (iioReader != null) {
             getLogger().debug("Using {}", iioReader.getClass().getName());
-
-            /*
-            http://docs.oracle.com/javase/8/docs/api/javax/imageio/ImageReader.html#setInput(java.lang.Object,%20boolean,%20boolean)
-            The ignoreMetadata parameter, if set to true, allows the reader
-            to disregard any metadata encountered during the read. Subsequent
-            calls to the getStreamMetadata and getImageMetadata methods may
-            return null, and an IIOImage returned from readAll may return null
-            from their getMetadata method. Setting this parameter may allow
-            the reader to work more efficiently. The reader may choose to
-            disregard this setting and return metadata normally.
-            */
-            final boolean ignoreMetadata = canIgnoreMetadata();
-            getLogger().debug("Ignoring metadata? {}", ignoreMetadata);
-
-            iioReader.setInput(inputStream, false, ignoreMetadata);
+            iioReader.setInput(inputStream, false, false);
         } else {
-            throw new IOException("Unable to determine the format of the" +
+            throw new IOException("Unable to determine the format of the " +
                     "source image.");
         }
     }
@@ -139,18 +135,20 @@ abstract class AbstractIIOImageReader {
      *         of most to least preferred, or an empty array if there is no
      *         preference.
      */
-    abstract String[] getApplicationPreferredIIOImplementations();
+    abstract protected String[] getApplicationPreferredIIOImplementations();
 
-    abstract Format getFormat();
+    abstract protected Format getFormat();
 
-    abstract Logger getLogger();
+    abstract protected Logger getLogger();
 
     /**
      * @return Number of images contained inside the source image.
      */
     public int getNumImages() throws IOException {
-        // The boolean argument tells getNumImages() whether to scan for
-        // images, which seems to be necessary for some, but is slower.
+        // Throw any contract-required exceptions.
+        getSize(0);
+        // The boolean argument tells whether to scan for images, which seems
+        // to be necessary for some, but is slower.
         int numImages = iioReader.getNumImages(false);
         if (numImages == -1) {
             numImages = iioReader.getNumImages(true);
@@ -162,6 +160,8 @@ abstract class AbstractIIOImageReader {
      * @return {@literal 1}.
      */
     public int getNumResolutions() throws IOException {
+        // Throw any contract-required exceptions.
+        getSize(0);
         return 1;
     }
 
@@ -173,7 +173,7 @@ abstract class AbstractIIOImageReader {
      * @return Preferred reader implementation classes, in order of highest to
      *         lowest priority, or an empty array if there is no preference.
      */
-    String[] getPreferredIIOImplementations() {
+    public String[] getPreferredIIOImplementations() {
         final List<String> impls = new ArrayList<>();
 
         // Prefer a user-specified implementation.
@@ -183,7 +183,7 @@ abstract class AbstractIIOImageReader {
         }
         // Fall back to an application-preferred implementation.
         final String[] appImpls = getApplicationPreferredIIOImplementations();
-        impls.addAll(Arrays.asList(appImpls));
+        impls.addAll(List.of(appImpls));
 
         return impls.toArray(new String[] {});
     }
@@ -192,9 +192,16 @@ abstract class AbstractIIOImageReader {
      * @return Pixel dimensions of the image at the given index.
      */
     public Dimension getSize(int imageIndex) throws IOException {
-        final int width = iioReader.getWidth(imageIndex);
-        final int height = iioReader.getHeight(imageIndex);
-        return new Dimension(width, height);
+        try {
+            final int width  = iioReader.getWidth(imageIndex);
+            final int height = iioReader.getHeight(imageIndex);
+            return new Dimension(width, height);
+        } catch (IndexOutOfBoundsException e) { // thrown by GeoSolutions TIFFImageReader
+            throw new SourceFormatException();
+        } catch (IIOException e) {
+            handle(e);
+            return null;
+        }
     }
 
     /**
@@ -202,19 +209,27 @@ abstract class AbstractIIOImageReader {
      *         dimensions if the image is not tiled (or is mono-tiled).
      */
     public Dimension getTileSize(int imageIndex) throws IOException {
-        final int width = iioReader.getTileWidth(imageIndex);
-        int height;
+        try {
+            final int width = iioReader.getTileWidth(imageIndex);
+            int height;
 
-        // If the tile width == the full image width, the image is almost
-        // certainly not tiled, and getTileHeight() may return 1 to indicate
-        // a strip height, or some other wonky value. In that case, set the
-        // tile height to the full image height.
-        if (width == iioReader.getWidth(imageIndex)) {
-            height = iioReader.getHeight(imageIndex);
-        } else {
-            height = iioReader.getTileHeight(imageIndex);
+            // If the tile width == the full image width, the image is almost
+            // certainly not tiled, or at least not in a way that is useful,
+            // and getTileHeight() may return 1 to indicate a strip height, or
+            // some other wonky value. In that case, set the tile height to the
+            // full image height.
+            if (width == iioReader.getWidth(imageIndex)) {
+                height = iioReader.getHeight(imageIndex);
+            } else {
+                height = iioReader.getTileHeight(imageIndex);
+            }
+            return new Dimension(width, height);
+        } catch (IndexOutOfBoundsException e) { // thrown by GeoSolutions TIFFImageReader
+            throw new SourceFormatException();
+        } catch (IIOException e) {
+            handle(e);
+            return null;
         }
-        return new Dimension(width, height);
     }
 
     /**
@@ -224,7 +239,7 @@ abstract class AbstractIIOImageReader {
      * @return Preferred ImageIO implementation as specified by the user. May
      *         be {@literal null}.
      */
-    abstract String getUserPreferredIIOImplementation();
+    abstract protected String getUserPreferredIIOImplementation();
 
     /**
      * Chooses the most appropriate ImageIO reader to use based on the return
@@ -266,7 +281,7 @@ abstract class AbstractIIOImageReader {
      *
      * @throws UnsupportedOperationException if the instance is not reusable.
      */
-    void reset() throws IOException {
+    protected void reset() throws IOException {
         if (source == null) {
             throw new UnsupportedOperationException("Instance is not reusable");
         } else if (source instanceof Path) {
@@ -336,8 +351,15 @@ abstract class AbstractIIOImageReader {
      * Expedient but not necessarily efficient method that reads a whole image
      * (excluding subimages) in one shot.
      */
-    public BufferedImage read() throws IOException {
-        return iioReader.read(0);
+    public BufferedImage read(int imageIndex) throws IOException {
+        try {
+            return iioReader.read(imageIndex);
+        } catch (IndexOutOfBoundsException e) { // thrown by GeoSolutions TIFFImageReader
+            throw new SourceFormatException();
+        } catch (IIOException e) {
+            handle(e);
+            throw e;
+        }
     }
 
     /**
@@ -349,9 +371,10 @@ abstract class AbstractIIOImageReader {
      * <p>After reading, clients should check the reader hints to see whether
      * the returned image will require cropping.</p>
      *
-     * @param ops
-     * @param orientation     Orientation of the source image data as reported
-     *                        by e.g. embedded metadata.
+     * @param imageIndex      Image index.
+     * @param crop            May be {@code null}.
+     * @param scale           May be {@code null}.
+     * @param scaleConstraint Scale constraint.
      * @param reductionFactor The {@link ReductionFactor#factor} property will
      *                        be modified to reflect the reduction factor of the
      *                        returned image.
@@ -359,31 +382,58 @@ abstract class AbstractIIOImageReader {
      *                        the reader.
      * @return                Image best matching the given arguments.
      */
-    public BufferedImage read(final OperationList ops,
-                              final Orientation orientation,
+    public BufferedImage read(final int imageIndex,
+                              final Crop crop,
+                              final Scale scale,
+                              final ScaleConstraint scaleConstraint,
                               final ReductionFactor reductionFactor,
                               final Set<ReaderHint> hints) throws IOException {
         BufferedImage image;
-
-        Crop crop = (Crop) ops.getFirst(Crop.class);
-        if (crop != null && !hints.contains(ReaderHint.IGNORE_CROP)) {
-            final Dimension fullSize = new Dimension(
-                    iioReader.getWidth(0), iioReader.getHeight(0));
-            image = tileAwareRead(0, crop.getRectangle(fullSize), hints);
-        } else {
-            image = iioReader.read(0);
+        try {
+            if (crop != null && !hints.contains(ReaderHint.IGNORE_CROP)) {
+                final Dimension fullSize = new Dimension(
+                        iioReader.getWidth(0), iioReader.getHeight(0));
+                image = tileAwareRead(
+                        imageIndex, crop.getRectangle(fullSize), hints);
+            } else {
+                image = iioReader.read(imageIndex);
+            }
+            if (image == null) {
+                throw new SourceFormatException(iioReader.getFormatName());
+            }
+            return image;
+        } catch (IndexOutOfBoundsException e) { // thrown by GeoSolutions TIFFImageReader
+            throw new SourceFormatException();
+        } catch (IIOException e) {
+            handle(e);
+            return null;
         }
+    }
 
-        if (image == null) {
-            throw new UnsupportedSourceFormatException(iioReader.getFormatName());
-        }
-
-        return image;
+    /**
+     * Reads a particular image from a multi-image file.
+     *
+     * @param imageIndex      Image index.
+     * @param crop            Requested crop.
+     * @param scaleConstraint Virtual scale constraint applied to the image.
+     * @return                Smallest image fitting the requested operations.
+     * @see                   #readSmallestUsableSubimage
+     */
+    protected BufferedImage readMonoResolution(
+            final int imageIndex,
+            final Crop crop,
+            final ScaleConstraint scaleConstraint,
+            final Set<ReaderHint> hints) throws IOException {
+        final Dimension fullSize = new Dimension(
+                iioReader.getWidth(0), iioReader.getHeight(0));
+        final Rectangle regionRect = crop.getRectangle(
+                fullSize, new ReductionFactor(), scaleConstraint);
+        return tileAwareRead(imageIndex, regionRect, hints);
     }
 
     /**
      * Reads the smallest image that can fulfill the given crop and scale from
-     * a multi-resolution image.
+     * a multi-image file.
      *
      * @param crop            Requested crop.
      * @param scale           Requested scale.
@@ -393,8 +443,9 @@ abstract class AbstractIIOImageReader {
      * @param hints           Will be populated by information returned by the
      *                        reader.
      * @return                Smallest image fitting the requested operations.
+     * @see                   #readMonoResolution
      */
-    BufferedImage readSmallestUsableSubimage(
+    protected BufferedImage readSmallestUsableSubimage(
             final Crop crop,
             final Scale scale,
             final ScaleConstraint scaleConstraint,
@@ -441,7 +492,7 @@ abstract class AbstractIIOImageReader {
 
                     final double reducedScale =
                             (double) subimageWidth / fullSize.width();
-                    if (fits(regionRect.size(), scale, scaleConstraint,
+                    if (fits(fullSize, regionRect.size(), scale, scaleConstraint,
                             reducedScale)) {
                         reductionFactor.factor =
                                 ReductionFactor.forScale(reducedScale).factor;
@@ -517,6 +568,14 @@ abstract class AbstractIIOImageReader {
         return iioReader.read(imageIndex, param);
     }
 
+    public BufferedImageSequence readSequence() throws IOException {
+        BufferedImageSequence seq = new BufferedImageSequence();
+        for (int i = 0, count = getNumImages(); i < count; i++) {
+            seq.add(iioReader.read(i));
+        }
+        return seq;
+    }
+
     ////////////////////////////////////////////////////////////////////////
     /////////////////////// RenderedImage methods //////////////////////////
     ////////////////////////////////////////////////////////////////////////
@@ -527,18 +586,19 @@ abstract class AbstractIIOImageReader {
      * @deprecated Since version 4.0.
      */
     @Deprecated
-    RenderedImage readRendered() throws IOException {
+    public RenderedImage readRendered() throws IOException {
         return iioReader.readAsRenderedImage(0,
                 iioReader.getDefaultReadParam());
     }
 
     /**
-     * <p>Attempts to reads an image as efficiently as possible, utilizing its
+     * <p>Attempts to read an image as efficiently as possible, utilizing its
      * tile layout and/or subimages, if possible.</p>
      *
-     * @param ops
-     * @param orientation     Orientation of the source image data, e.g. as
-     *                        reported by embedded metadata.
+     * @param imageIndex
+     * @param crop            May be {@code null}.
+     * @param scale           May be {@code null}.
+     * @param scaleConstraint Scale constraint.
      * @param reductionFactor The {@link ReductionFactor#factor} property will
      *                        be modified to reflect the reduction factor of the
      *                        returned image.
@@ -549,54 +609,62 @@ abstract class AbstractIIOImageReader {
      * @deprecated            Since version 4.0.
      */
     @Deprecated
-    public RenderedImage readRendered(final OperationList ops,
-                                      final Orientation orientation,
+    public RenderedImage readRendered(int imageIndex,
+                                      Crop crop,
+                                      Scale scale,
+                                      final ScaleConstraint scaleConstraint,
                                       final ReductionFactor reductionFactor,
                                       final Set<ReaderHint> hints) throws IOException {
-        Crop crop = (Crop) ops.getFirst(Crop.class);
         if (crop == null) {
             crop = new CropByPercent();
         }
-
-        Scale scale = (Scale) ops.getFirst(Scale.class);
         if (scale == null) {
-            scale = new Scale();
+            scale = new ScaleByPercent();
         }
 
         RenderedImage image;
-        if (hints != null && hints.contains(ReaderHint.IGNORE_CROP)) {
-            image = readRendered();
-        } else {
-            image = readSmallestUsableSubimage(
-                    crop, scale, ops.getScaleConstraint(), reductionFactor);
+        try {
+            if (hints != null && hints.contains(ReaderHint.IGNORE_CROP)) {
+                image = readRendered();
+            } else {
+                final Dimension fullSize = new Dimension(
+                        iioReader.getWidth(imageIndex),
+                        iioReader.getHeight(imageIndex));
+                image = readSmallestUsableSubimage(
+                        crop.getRectangle(fullSize), scale, fullSize,
+                        scaleConstraint, reductionFactor);
+            }
+            if (image == null) {
+                throw new SourceFormatException(iioReader.getFormatName());
+            }
+            return image;
+        } catch (IndexOutOfBoundsException e) { // thrown by GeoSolutions TIFFImageReader
+            throw new SourceFormatException();
+        } catch (IIOException e) {
+            handle(e);
+            return null;
         }
-        if (image == null) {
-            throw new UnsupportedSourceFormatException(iioReader.getFormatName());
-        }
-        return image;
     }
 
     /**
      * Reads the smallest image that can fulfill the given crop and scale from
      * a multi-resolution image.
      *
-     * @param crop  Requested crop.
-     * @param scale Requested scale.
-     * @param rf    The {@link ReductionFactor#factor} will be set to the
-     *              reduction factor of the returned image.
-     * @return      The smallest image fitting the requested crop and scale
-     *              operations from the given reader.
+     * @param region Requested region.
+     * @param scale  Requested scale.
+     * @param rf     The {@link ReductionFactor#factor} will be set to the
+     *               reduction factor of the returned image.
+     * @return       The smallest image fitting the requested crop and scale
+     *               operations from the given reader.
      * @deprecated Since version 4.0.
      */
     @Deprecated
     private RenderedImage readSmallestUsableSubimage(
-            final Crop crop,
+            final Rectangle region,
             final Scale scale,
+            final Dimension fullSize,
             final ScaleConstraint scaleConstraint,
             final ReductionFactor rf) throws IOException {
-        final Dimension fullSize = new Dimension(
-                iioReader.getWidth(0), iioReader.getHeight(0));
-        final Rectangle regionRect = crop.getRectangle(fullSize);
         final ImageReadParam param = iioReader.getDefaultReadParam();
 
         RenderedImage bestImage = null;
@@ -633,7 +701,7 @@ abstract class AbstractIIOImageReader {
 
                     final double reducedScale =
                             (double) subimageWidth / fullSize.width();
-                    if (fits(regionRect.size(), scale, scaleConstraint,
+                    if (fits(fullSize, region.size(), scale, scaleConstraint,
                             reducedScale)) {
                         rf.factor = ReductionFactor.forScale(reducedScale).factor;
                         getLogger().trace("Subimage {}: {}x{} - fits! " +
@@ -653,6 +721,7 @@ abstract class AbstractIIOImageReader {
     }
 
     /**
+     * @param fullSize        Size of the base pyramid image.
      * @param regionSize      Size of a cropped source image region.
      * @param scale           Requested scale.
      * @param scaleConstraint Scale constraint to be applied to the requested
@@ -662,36 +731,50 @@ abstract class AbstractIIOImageReader {
      *                        satisfied by the given reduced scale at the
      *                        requested scale.
      */
-    private boolean fits(final Dimension regionSize,
+    private boolean fits(final Dimension fullSize,
+                         final Dimension regionSize,
                          final Scale scale,
                          final ScaleConstraint scaleConstraint,
                          final double reducedScale) {
-        final double scScale = scaleConstraint.getRational().doubleValue();
+        if (scale instanceof ScaleByPercent) {
+            return fits(fullSize, (ScaleByPercent) scale, scaleConstraint, reducedScale);
+        }
+        return fits(fullSize, regionSize, (ScaleByPixels) scale, reducedScale);
+    }
 
-        if (scale.getPercent() != null) {
-            double cappedScale = (scale.getPercent() > 1) ?
-                    1 : scale.getPercent();
-            return (cappedScale * scScale <= reducedScale);
-        } else {
-            switch (scale.getMode()) {
-                case FULL:
-                    return (scScale <= reducedScale);
-                case ASPECT_FIT_WIDTH:
-                    double cappedWidth = (scale.getWidth() > regionSize.width()) ?
+    private boolean fits(final Dimension fullSize,
+                         final ScaleByPercent scale,
+                         final ScaleConstraint scaleConstraint,
+                         final double reducedScale) {
+        final double tolerance = 1 / Math.max(fullSize.width(), fullSize.height());
+        final double scScale   = scaleConstraint.getRational().doubleValue();
+        double cappedScale     = (scale.getPercent() > 1) ? 1 : scale.getPercent();
+        return (cappedScale * scScale <= reducedScale + tolerance);
+    }
+
+    private boolean fits(final Dimension fullSize,
+                         final Dimension regionSize,
+                         final ScaleByPixels scale,
+                         final double reducedScale) {
+        switch (scale.getMode()) {
+            case ASPECT_FIT_WIDTH:
+                double tolerance = 1 / fullSize.width();
+                double cappedWidth = (scale.getWidth() > regionSize.width()) ?
                         regionSize.width() : scale.getWidth();
-                    return (cappedWidth / regionSize.width() <= reducedScale);
-                case ASPECT_FIT_HEIGHT:
-                    double cappedHeight = (scale.getHeight() > regionSize.height()) ?
-                            regionSize.height() : scale.getHeight();
-                    return (cappedHeight / regionSize.height() <= reducedScale);
-                default:
-                    cappedWidth = (scale.getWidth() > regionSize.width()) ?
-                            regionSize.width() : scale.getWidth();
-                    cappedHeight = (scale.getHeight() > regionSize.height()) ?
-                            regionSize.height() : scale.getHeight();
-                    return (cappedWidth / regionSize.width() <= reducedScale &&
-                            cappedHeight / regionSize.height() <= reducedScale);
-            }
+                return (cappedWidth / regionSize.width() <= reducedScale + tolerance);
+            case ASPECT_FIT_HEIGHT:
+                tolerance = 1 / fullSize.height();
+                double cappedHeight = (scale.getHeight() > regionSize.height()) ?
+                        regionSize.height() : scale.getHeight();
+                return (cappedHeight / regionSize.height() <= reducedScale + tolerance);
+            default:
+                tolerance = 1 / Math.max(fullSize.width(), fullSize.height());
+                cappedWidth = (scale.getWidth() > regionSize.width()) ?
+                        regionSize.width() : scale.getWidth();
+                cappedHeight = (scale.getHeight() > regionSize.height()) ?
+                        regionSize.height() : scale.getHeight();
+                return (cappedWidth / regionSize.width() <= reducedScale + tolerance &&
+                        cappedHeight / regionSize.height() <= reducedScale + tolerance);
         }
     }
 

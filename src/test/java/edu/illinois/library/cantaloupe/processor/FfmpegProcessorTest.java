@@ -9,22 +9,21 @@ import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.apache.commons.io.output.NullOutputStream;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.file.Path;
 import java.util.Arrays;
-import java.util.EnumSet;
 
+import java.util.HashSet;
 import java.util.Set;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * For this to work, the ffmpeg and ffprobe binaries must be on the PATH.
@@ -33,7 +32,7 @@ public class FfmpegProcessorTest extends AbstractProcessorTest {
 
     private FfmpegProcessor instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
@@ -44,11 +43,17 @@ public class FfmpegProcessorTest extends AbstractProcessorTest {
         instance = newInstance();
     }
 
+    @AfterEach
+    public void tearDown() throws Exception {
+        super.tearDown();
+        instance.close();
+    }
+
     @Override
     protected FfmpegProcessor newInstance() {
         FfmpegProcessor instance = new FfmpegProcessor();
         try {
-            final Format format = Format.MPG;
+            final Format format = Format.get("mpg");
             final Path fixture = TestUtil.
                     getFixture("images/" + format.getPreferredExtension());
             instance.setSourceFile(fixture);
@@ -60,30 +65,29 @@ public class FfmpegProcessorTest extends AbstractProcessorTest {
     }
 
     @Test
-    public void testGetAvailableOutputFormats() {
-        for (Format format : Format.values()) {
+    void testGetAvailableOutputFormats() {
+        for (Format format : Format.all()) {
             try {
                 instance = newInstance();
-                Set<Format> expectedFormats = EnumSet.noneOf(Format.class);
-                if (format.getType() != null &&
-                        format.getType().equals(Format.Type.VIDEO)) {
+                Set<Format> expectedFormats = new HashSet<>();
+                if (format.isVideo()) {
                     expectedFormats.addAll(ImageWriterFactory.supportedFormats());
                 }
                 instance.setSourceFormat(format);
                 assertEquals(expectedFormats, instance.getAvailableOutputFormats());
-            } catch (UnsupportedSourceFormatException e) {
+            } catch (SourceFormatException e) {
                 // continue
             }
         }
     }
 
     @Test
-    public void testGetInitializationErrorWithNoError() {
+    void testGetInitializationErrorWithNoError() {
         assertNull(instance.getInitializationError());
     }
 
     @Test
-    public void testGetInitializationErrorWithMissingBinaries() {
+    void testGetInitializationErrorWithMissingBinaries() {
         Configuration.getInstance().setProperty(
                 Key.FFMPEGPROCESSOR_PATH_TO_BINARIES,
                 "/bogus/bogus/bogus");
@@ -91,65 +95,26 @@ public class FfmpegProcessorTest extends AbstractProcessorTest {
         assertNotNull(instance.getInitializationError());
     }
 
-    @Test
-    public void testGetSupportedFeatures() throws Exception {
-        instance.setSourceFormat(getAnySupportedSourceFormat(instance));
-        Set<ProcessorFeature> expectedFeatures = EnumSet.of(
-                ProcessorFeature.MIRRORING,
-                ProcessorFeature.REGION_BY_PERCENT,
-                ProcessorFeature.REGION_BY_PIXELS,
-                ProcessorFeature.REGION_SQUARE,
-                ProcessorFeature.ROTATION_ARBITRARY,
-                ProcessorFeature.ROTATION_BY_90S,
-                ProcessorFeature.SIZE_ABOVE_FULL,
-                ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_HEIGHT,
-                ProcessorFeature.SIZE_BY_PERCENT,
-                ProcessorFeature.SIZE_BY_WIDTH,
-                ProcessorFeature.SIZE_BY_WIDTH_HEIGHT);
-        assertEquals(expectedFeatures, instance.getSupportedFeatures());
-    }
-
-    @Test
+    @Disabled // there is currently no way to support this
     @Override
-    public void testGetSupportedIIIF1Qualities() throws Exception {
-        instance.setSourceFormat(getAnySupportedSourceFormat(instance));
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality> expectedQualities =
-                EnumSet.of(
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.BITONAL,
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.COLOR,
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.GREY,
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.NATIVE);
-        assertEquals(expectedQualities, instance.getSupportedIIIF1Qualities());
+    @Test
+    public void testProcessWithActualFormatDifferentFromSetFormat() {
     }
 
     @Test
-    @Override
-    public void testGetSupportedIIIF2Qualities() throws Exception {
-        instance.setSourceFormat(getAnySupportedSourceFormat(instance));
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality> expectedQualities =
-                EnumSet.of(
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.BITONAL,
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.COLOR,
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.DEFAULT,
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.GRAY);
-        assertEquals(expectedQualities, instance.getSupportedIIIF2Qualities());
-    }
-
-    @Test
-    public void testProcessWithTimeOption() throws Exception {
+    void testProcessWithPageIndex() throws Exception {
         final Info imageInfo = instance.readInfo();
 
-        // time option missing
+        // page index missing
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        OperationList ops = new OperationList(new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
         instance.process(ops, imageInfo, outputStream);
         final byte[] frame1 = outputStream.toByteArray();
 
-        // time option present
-        ops.getOptions().put("time", "00:00:05");
+        // page index present
+        ops.setPageIndex(3);
         outputStream = new ByteArrayOutputStream();
         instance.process(ops, imageInfo, outputStream);
         final byte[] frame2 = outputStream.toByteArray();
@@ -157,46 +122,31 @@ public class FfmpegProcessorTest extends AbstractProcessorTest {
         assertFalse(Arrays.equals(frame1, frame2));
     }
 
-    @Test(expected = ProcessorException.class)
-    public void testProcessWithInvalidFrameOptionThrowsException()
-            throws Exception {
-        final Info imageInfo = instance.readInfo();
-
-        OperationList ops = new OperationList(new Encode(Format.JPG));
-        ops.getOptions().put("time", "cats");
-        OutputStream outputStream = new NullOutputStream();
-
-        instance.process(ops, imageInfo, outputStream);
+    @Test
+    void testSupportsSourceFormatWithSupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertTrue(instance.supportsSourceFormat(Format.get("mp4")));
+        }
     }
 
     @Test
-    public void testValidateWithValidTime() throws Exception {
-        OperationList ops = new OperationList(
-                new Identifier("cats"), new Encode(Format.JPG));
-        Dimension fullSize = new Dimension(1000, 1000);
-        ops.getOptions().put("time", "00:00:02");
-
-        instance.validate(ops, fullSize);
+    void testSupportsSourceFormatWithUnsupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertFalse(instance.supportsSourceFormat(Format.get("gif")));
+        }
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testValidateWithInvalidTimeFormat() throws Exception {
-        OperationList ops = new OperationList(
-                new Identifier("cats"), new Encode(Format.JPG));
+    @Test
+    void testValidateWithOutOfBoundsTime() {
+        OperationList ops = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withPageIndex(9999999)
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
         Dimension fullSize = new Dimension(1000, 1000);
-        ops.getOptions().put("time", "000012");
 
-        instance.validate(ops, fullSize);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testValidateWithOutOfBoundsTime() throws Exception {
-        OperationList ops = new OperationList(
-                new Identifier("cats"), new Encode(Format.JPG));
-        Dimension fullSize = new Dimension(1000, 1000);
-        ops.getOptions().put("time", "00:38:06");
-
-        instance.validate(ops, fullSize);
+        assertThrows(IllegalArgumentException.class,
+                () -> instance.validate(ops, fullSize));
     }
 
 }

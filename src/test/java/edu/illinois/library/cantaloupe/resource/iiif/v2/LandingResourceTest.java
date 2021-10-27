@@ -10,17 +10,13 @@ import edu.illinois.library.cantaloupe.http.Response;
 import edu.illinois.library.cantaloupe.resource.ResourceTest;
 import edu.illinois.library.cantaloupe.resource.Route;
 import org.apache.commons.lang3.StringUtils;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.util.Arrays;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.*;
 import static edu.illinois.library.cantaloupe.test.Assert.HTTPAssert.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 /**
  * Functional test of LandingResource.
@@ -33,7 +29,7 @@ public class LandingResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETWithEndpointEnabled() {
+    void testGETWithEndpointEnabled() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, true);
         assertStatus(200, getHTTPURI(""));
@@ -41,20 +37,20 @@ public class LandingResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETWithEndpointDisabled() {
+    void testGETWithEndpointDisabled() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, false);
         assertStatus(403, getHTTPURI(""));
     }
 
     @Test
-    public void testGETWithTrailingSlashRedirectsToWithout() throws Exception {
+    void testGETWithTrailingSlashRedirectsToWithout() throws Exception {
         final URI uri = getHTTPURI("");
         assertRedirect(new URI(uri + "/"), uri, 301);
     }
 
     @Test
-    public void testGETResponseHeaders() throws Exception {
+    void testGETResponseHeaders() throws Exception {
         client = newClient("");
         Response response = client.send();
         Headers headers = response.getHeaders();
@@ -63,15 +59,15 @@ public class LandingResourceTest extends ResourceTest {
         // Access-Control-Allow-Origin
         assertEquals("*", headers.getFirstValue("Access-Control-Allow-Origin"));
         // Content-Type
-        assertEquals("text/html;charset=UTF-8",
-                headers.getFirstValue("Content-Type"));
+        assertTrue("text/html;charset=UTF-8".equalsIgnoreCase(
+                headers.getFirstValue("Content-Type")));
         // Date
         assertNotNull(headers.getFirstValue("Date"));
         // Server
         assertNotNull(headers.getFirstValue("Server"));
         // Vary
         List<String> parts =
-                Arrays.asList(StringUtils.split(headers.getFirstValue("Vary"), ", "));
+                List.of(StringUtils.split(headers.getFirstValue("Vary"), ", "));
         assertEquals(5, parts.size());
         assertTrue(parts.contains("Accept"));
         assertTrue(parts.contains("Accept-Charset"));
@@ -84,7 +80,7 @@ public class LandingResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testOPTIONSWhenEnabled() throws Exception {
+    void testOPTIONSWhenEnabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, true);
 
@@ -95,14 +91,14 @@ public class LandingResourceTest extends ResourceTest {
 
         Headers headers = response.getHeaders();
         List<String> methods =
-                Arrays.asList(StringUtils.split(headers.getFirstValue("Allow"), ", "));
+                List.of(StringUtils.split(headers.getFirstValue("Allow"), ", "));
         assertEquals(2, methods.size());
         assertTrue(methods.contains("GET"));
         assertTrue(methods.contains("OPTIONS"));
     }
 
     @Test
-    public void testOPTIONSWhenDisabled() throws Exception {
+    void testOPTIONSWhenDisabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, false);
         try {

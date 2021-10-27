@@ -9,40 +9,37 @@ import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
 import edu.illinois.library.cantaloupe.util.DeletingFileVisitor;
 import edu.illinois.library.cantaloupe.util.SocketUtils;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.contrib.java.lang.system.ExpectedSystemExit;
+import edu.illinois.library.cantaloupe.util.SystemUtils;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.*;
 
 public class StandaloneEntryTest extends BaseTest {
 
     private static final PrintStream CONSOLE_OUTPUT = System.out;
-    private static final PrintStream CONSOLE_ERROR = System.err;
-    private static final int HTTP_PORT = SocketUtils.getOpenPort();
+    private static final PrintStream CONSOLE_ERROR  = System.err;
+    private static final int HTTP_PORT              = SocketUtils.getOpenPort();
+    private static final String NEWLINE             = System.getProperty("line.separator");
 
-    private Client httpClient = new Client();
+    private final Client httpClient = new Client();
 
     private Path cacheDir;
     private final ByteArrayOutputStream redirectedOutput =
             new ByteArrayOutputStream();
     private final ByteArrayOutputStream redirectedError =
             new ByteArrayOutputStream();
-
-    // http://stackoverflow.com/questions/6141252/dealing-with-system-exit0-in-junit-tests
-    @Rule
-    public final ExpectedSystemExit exit = ExpectedSystemExit.none();
 
     private void deleteCacheDir() throws IOException {
         Files.walkFileTree(getCacheDir(), new DeletingFileVisitor());
@@ -68,9 +65,11 @@ public class StandaloneEntryTest extends BaseTest {
         System.setErr(CONSOLE_ERROR);
     }
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
+
+        SystemUtils.clearExitRequest();
 
         System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT,
                 TestUtil.getFixture("config.properties").toString());
@@ -87,40 +86,37 @@ public class StandaloneEntryTest extends BaseTest {
         httpClient.setURI(new URI("http://localhost:" + HTTP_PORT + "/"));
     }
 
-    @After
+    @AfterEach
     public void tearDown() throws Exception {
         super.tearDown();
         StandaloneEntry.getAppServer().stop();
         httpClient.stop();
         deleteCacheDir();
         System.clearProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT);
-        System.clearProperty(StandaloneEntry.LIST_FONTS_VM_ARGUMENT);
+        System.clearProperty(StandaloneEntry.LIST_FONTS_ARGUMENT);
         resetOutput();
     }
 
     // list fonts
 
     @Test
-    public void mainWithListFontsOption() throws Exception {
+    void mainWithListFontsArgument() throws Exception {
         redirectOutput();
-        System.setProperty(StandaloneEntry.LIST_FONTS_VM_ARGUMENT, "");
-        StandaloneEntry.main("");
+        StandaloneEntry.main(StandaloneEntry.LIST_FONTS_ARGUMENT);
         assertTrue(redirectedOutput.toString().contains("SansSerif"));
     }
 
     @Test
-    public void mainWithListFontsOptionExits() throws Exception {
-        exit.expectSystemExitWithStatus(0);
-        System.clearProperty(Application.TEST_VM_ARGUMENT);
-
-        System.setProperty(StandaloneEntry.LIST_FONTS_VM_ARGUMENT, "");
-        StandaloneEntry.main("");
+    void mainWithListFontsArgumentExits() throws Exception {
+        StandaloneEntry.main(StandaloneEntry.LIST_FONTS_ARGUMENT);
+        assertTrue(SystemUtils.exitRequested());
+        assertEquals(0, SystemUtils.requestedExitCode());
     }
 
     // missing config
 
     @Test
-    public void mainWithMissingConfigOptionPrintsUsage() throws Exception {
+    void mainWithMissingConfigOptionPrintsUsage() throws Exception {
         redirectOutput();
         System.clearProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT);
         StandaloneEntry.main("");
@@ -129,78 +125,104 @@ public class StandaloneEntryTest extends BaseTest {
     }
 
     @Test
-    public void mainWithMissingConfigOptionExits() throws Exception {
-        System.clearProperty(Application.TEST_VM_ARGUMENT);
-        exit.expectSystemExitWithStatus(-1);
+    void mainWithMissingConfigOptionExits() throws Exception {
         System.clearProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT);
+
         StandaloneEntry.main("");
+        assertTrue(SystemUtils.exitRequested());
+        assertEquals(-1, SystemUtils.requestedExitCode());
     }
 
     // empty config VM option
 
     @Test
-    public void mainWithEmptyConfigOptionPrintsUsage() throws Exception {
+    void mainWithEmptyConfigOptionPrintsUsage() throws Exception {
+        // TODO: why does this test fail in Windows with a NullPointerException?
+        assumeFalse(org.apache.commons.lang3.SystemUtils.IS_OS_WINDOWS);
+
         redirectOutput();
         System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT, "");
         StandaloneEntry.main("");
+
+        String message = redirectedOutput.toString();
+        assertTrue(message.contains("Usage:"));
     }
 
     @Test
-    public void mainWithEmptyConfigOptionExits() throws Exception {
-        System.clearProperty(Application.TEST_VM_ARGUMENT);
-        exit.expectSystemExitWithStatus(-1);
+    void mainWithEmptyConfigOptionExits() throws Exception {
         System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT, "");
+
         StandaloneEntry.main("");
+        assertTrue(SystemUtils.exitRequested());
+        assertEquals(-1, SystemUtils.requestedExitCode());
     }
 
     // missing config file
 
     @Test
-    public void mainWithInvalidConfigFileArgumentPrintsUsage() throws Exception {
+    void mainWithInvalidConfigFileArgumentPrintsUsage() throws Exception {
         redirectOutput();
-        String path = "/bla/bla/bla";
+        String path = Paths.get("bla").toAbsolutePath().toString();
         System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT, path);
+
         StandaloneEntry.main("");
-        assertEquals("Does not exist: " + path + "\n\n" + StandaloneEntry.usage().trim(),
-                redirectedOutput.toString().trim());
+        assertEquals("Does not exist: " + path + NEWLINE + NEWLINE +
+                        StandaloneEntry.usage() + NEWLINE,
+                redirectedOutput.toString());
     }
 
     @Test
-    public void mainWithInvalidConfigFileArgumentExits() throws Exception {
-        System.clearProperty(Application.TEST_VM_ARGUMENT);
-        exit.expectSystemExitWithStatus(-1);
+    void mainWithInvalidConfigFileArgumentExits() throws Exception {
         System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT, "/bla/bla/bla");
+
         StandaloneEntry.main("");
+        assertTrue(SystemUtils.exitRequested());
+        assertEquals(-1, SystemUtils.requestedExitCode());
     }
 
     // config file is a directory
 
     @Test
-    public void mainWithDirectoryConfigFileArgumentPrintsUsage() throws Exception {
+    void mainWithDirectoryConfigFileArgumentPrintsUsage() throws Exception {
         redirectOutput();
         String path = TestUtil.getFixture("bla").getParent().toString();
         System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT, path);
         StandaloneEntry.main("");
-        assertEquals("Not a file: " + path + "\n\n" + StandaloneEntry.usage().trim(),
-                redirectedOutput.toString().trim());
+
+        String expected = "Not a file: " + path + NEWLINE + NEWLINE +
+                StandaloneEntry.usage() + NEWLINE;
+        String actual = redirectedOutput.toString();
+        assertEquals(expected, actual);
     }
 
     @Test
-    public void mainWithDirectoryConfigFileArgumentExits() throws Exception {
-        System.clearProperty(Application.TEST_VM_ARGUMENT);
-        exit.expectSystemExitWithStatus(-1);
+    void mainWithDirectoryConfigFileArgumentExits() throws Exception {
         System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT,
                 TestUtil.getFixture("bla").getParent().toString());
+
         StandaloneEntry.main("");
+        assertTrue(SystemUtils.exitRequested());
+        assertEquals(-1, SystemUtils.requestedExitCode());
     }
 
     // valid config file
 
     @Test
-    public void mainWithValidConfigFileArgumentStartsServer() throws Exception {
+    void mainWithValidConfigFileArgumentStartsServer() throws Exception {
         StandaloneEntry.main("");
         Response response = httpClient.send();
         assertEquals(200, response.getStatus());
+    }
+
+    @Disabled // TODO: this sometimes passes and sometimes fails
+    @Test
+    void mainWithFailingToBindToPortExits() throws Exception {
+        final Configuration config = Configuration.getInstance();
+        int port = SocketUtils.getUsedPort();
+        config.setProperty(Key.HTTP_PORT, port);
+
+        StandaloneEntry.main("");
+        assertEquals(-1, SystemUtils.requestedExitCode());
     }
 
 }

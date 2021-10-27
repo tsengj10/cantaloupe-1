@@ -4,8 +4,6 @@ import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
-import edu.illinois.library.cantaloupe.resource.iiif.v1.Quality;
 
 import java.io.OutputStream;
 import java.util.HashSet;
@@ -41,22 +39,6 @@ public class MockStreamProcessor implements StreamProcessor {
     }
 
     @Override
-    public Set<ProcessorFeature> getSupportedFeatures() {
-        return new HashSet<>();
-    }
-
-    @Override
-    public Set<Quality> getSupportedIIIF1Qualities() {
-        return new HashSet<>();
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-    getSupportedIIIF2Qualities() {
-        return new HashSet<>();
-    }
-
-    @Override
     public boolean isSeeking() {
         return isSeeking;
     }
@@ -79,13 +61,18 @@ public class MockStreamProcessor implements StreamProcessor {
 
     @Override
     public void setSourceFormat(Format format)
-            throws UnsupportedSourceFormatException {
+            throws SourceFormatException {
         this.sourceFormat = format;
     }
 
     @Override
     public void setStreamFactory(StreamFactory source) {
         this.streamFactory = source;
+    }
+
+    @Override
+    public boolean supportsSourceFormat(Format format) {
+        return true;
     }
 
 }

@@ -6,14 +6,15 @@ import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Info;
+import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ValidationException;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReader;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReaderFactory;
 import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
+import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFacade;
 import edu.illinois.library.cantaloupe.util.CommandLocator;
-import org.apache.commons.lang3.StringUtils;
+import edu.illinois.library.cantaloupe.util.TimeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,7 +25,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -32,8 +32,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Processor using the {@literal ffmpeg} command-line tool to extract video
@@ -45,10 +43,8 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
     private static final Logger LOGGER = LoggerFactory.
             getLogger(FfmpegProcessor.class);
 
-    private static final String FFMPEG_NAME   = "ffmpeg";
-    private static final String FFPROBE_NAME  = "ffprobe";
-    private static final Pattern TIME_PATTERN =
-            Pattern.compile("[0-9][0-9]:[0-5][0-9]:[0-5][0-9]");
+    private static final String FFMPEG_NAME  = "ffmpeg";
+    private static final String FFPROBE_NAME = "ffprobe";
 
     private static final AtomicBoolean IS_INITIALIZATION_ATTEMPTED =
             new AtomicBoolean(false);
@@ -57,7 +53,7 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
     private Path sourceFile;
 
     private double durationSec = 0;
-    private Info imageInfo;
+    private Info info;
 
     /**
      * @param binaryName Name of one of the ffmpeg binaries.
@@ -85,7 +81,7 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
         command.add(getPath(ffmpegBinary));
         pb.command(command);
         String commandString = String.join(" ", pb.command());
-        LOGGER.info("invoke(): {}", commandString);
+        LOGGER.trace("invoke(): {}", commandString);
         pb.start();
     }
 
@@ -132,31 +128,16 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
     }
 
     @Override
-    public Set<ProcessorFeature> getSupportedFeatures() {
-        return Java2DPostProcessor.SUPPORTED_FEATURES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality> getSupportedIIIF1Qualities() {
-        return Java2DPostProcessor.SUPPORTED_IIIF_1_QUALITIES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality> getSupportedIIIF2Qualities() {
-        return Java2DPostProcessor.SUPPORTED_IIIF_2_QUALITIES;
-    }
-
-    @Override
     public void process(final OperationList opList,
                         final Info imageInfo,
                         final OutputStream outputStream)
-            throws ProcessorException {
+            throws ProcessorException, FormatException {
         super.process(opList, imageInfo, outputStream);
 
         final ByteArrayOutputStream errorBucket = new ByteArrayOutputStream();
         try {
             final ProcessBuilder pb = getProcessBuilder(opList);
-            LOGGER.info("Invoking {}", String.join(" ", pb.command()));
+            LOGGER.trace("Invoking {}", String.join(" ", pb.command()));
             final Process process = pb.start();
 
             try (final InputStream processInputStream = process.getInputStream();
@@ -165,17 +146,21 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
                         new StreamCopier(processErrorStream, errorBucket));
 
                 final ImageReader reader = new ImageReaderFactory().newImageReader(
-                        processInputStream, Format.BMP);
+                        Format.get("bmp"), processInputStream);
                 try {
-                    BufferedImage image = reader.read();
-                    Java2DPostProcessor.postProcess(image, null, opList,
-                            imageInfo, null, null, outputStream);
+                    BufferedImage image = reader.read(0);
+                    image = Java2DPostProcessor.postProcess(
+                            image, null, opList, imageInfo, null);
+                    ImageWriterFacade.write(
+                            image,
+                            (Encode) opList.getFirst(Encode.class),
+                            outputStream);
                     final int code = process.waitFor();
                     if (code != 0) {
                         LOGGER.error("{} returned with code {}",
                                 FFMPEG_NAME, code);
-                        final String errorStr = errorBucket.toString("UTF-8");
-                        if (errorStr != null && errorStr.length() > 0) {
+                        final String errorStr = errorBucket.toString(StandardCharsets.UTF_8);
+                        if (errorStr != null && errorStr.isBlank()) {
                             throw new ProcessorException(errorStr);
                         }
                     }
@@ -187,20 +172,15 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
             }
         } catch (Exception e) {
             String msg = e.getMessage();
-            try {
-                final String errorStr = errorBucket.toString("UTF-8");
-                if (errorStr != null && errorStr.length() > 0) {
-                    msg += " (command output: " + msg + ")";
-                }
-            } catch (UnsupportedEncodingException e2) {
-                LOGGER.error("process(): {}", e2.getMessage());
+            final String errorStr = errorBucket.toString(StandardCharsets.UTF_8);
+            if (errorStr != null && !errorStr.isBlank()) {
+                msg += " (command output: " + msg + ")";
             }
             throw new ProcessorException(msg, e);
         }
     }
 
     /**
-     * @param opList
      * @return Command string corresponding to the given operation list.
      */
     private ProcessBuilder getProcessBuilder(OperationList opList) {
@@ -209,16 +189,20 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
         command.add("-i");
         command.add(sourceFile.toString());
 
-        // Seeking to a particular time is supported via a "time" URL query
-        // parameter which gets injected into an -ss flag. FFmpeg supports
-        // additional syntax, but this will do for now.
-        // https://trac.ffmpeg.org/wiki/Seeking
-        String time = (String) opList.getOptions().get("time");
-        if (time != null) { // we assume it's already been validated.
-            command.add("-ss");
-            command.add(time);
-        }
-
+        // Seeking to a frame at a particular second is supported in one of two
+        // ways:
+        //
+        // 1. A "page number" in the meta-identifier, which is actually a
+        //    second
+        // 2. A "time" URL query argument (deprecated in 5.0)
+        //
+        // These get inserted into the operation list's page index property, in
+        // priority order.
+        // See: https://trac.ffmpeg.org/wiki/Seeking
+        final int second  = opList.getPageIndex();
+        final String time = TimeUtils.toHMS(second);
+        command.add("-ss");
+        command.add(time);
         command.add("-nostdin");
         command.add("-v");
         command.add("quiet");
@@ -230,7 +214,6 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
         command.add("-f"); // source or output format depending on position
         command.add("image2pipe");
         command.add("pipe:1");
-
         return new ProcessBuilder(command);
     }
 
@@ -240,7 +223,7 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
      */
     @Override
     public Info readInfo() throws IOException {
-        if (imageInfo == null) {
+        if (info == null) {
             final List<String> command = new ArrayList<>();
             command.add(getPath(FFPROBE_NAME));
             command.add("-v");
@@ -256,34 +239,40 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
 
-            LOGGER.info("Invoking {}", StringUtils.join(pb.command(), " "));
+            LOGGER.trace("Invoking {}", String.join(" ", pb.command()));
             Process process = pb.start();
 
             try (InputStream processInputStream = process.getInputStream();
                  BufferedReader reader = new BufferedReader(
                          new InputStreamReader(
                                  processInputStream, StandardCharsets.UTF_8))) {
-                int width = Integer.parseInt(reader.readLine());
-                int height = Integer.parseInt(reader.readLine());
-                try {
-                    durationSec = Double.parseDouble(reader.readLine());
-                } catch (NumberFormatException e) {
-                    LOGGER.debug("readInfo(): {}", e.getMessage());
+                String tmpWidth  = reader.readLine();
+                String tmpHeight = reader.readLine();
+                if (tmpWidth != null && tmpHeight != null) {
+                    int width  = Integer.parseInt(tmpWidth);
+                    int height = Integer.parseInt(tmpHeight);
+                    try {
+                        durationSec = Double.parseDouble(reader.readLine());
+                    } catch (NumberFormatException e) {
+                        LOGGER.info("readInfo(): {}", e.getMessage());
+                    }
+                    info = Info.builder()
+                            .withSize(width, height)
+                            .withTileSize(width, height)
+                            .withFormat(getSourceFormat())
+                            .build();
+                    info.setNumResolutions(1);
+                } else {
+                    throw new SourceFormatException();
                 }
-                imageInfo = Info.builder()
-                        .withSize(width, height)
-                        .withTileSize(width, height)
-                        .withFormat(getSourceFormat())
-                        .build();
-                imageInfo.setNumResolutions(1);
             }
         }
-        return imageInfo;
+        return info;
     }
 
     private void reset() {
         durationSec = 0;
-        imageInfo = null;
+        info = null;
     }
 
     @Override
@@ -293,15 +282,19 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
     }
 
     @Override
-    public void setSourceFormat(Format format)
-            throws UnsupportedSourceFormatException {
+    public void setSourceFormat(Format format) throws SourceFormatException {
         super.setSourceFormat(format);
         reset();
     }
 
     @Override
+    public boolean supportsSourceFormat(Format format) {
+        return format.isVideo();
+    }
+
+    @Override
     public void validate(OperationList opList, Dimension fullSize)
-            throws ValidationException, ProcessorException {
+            throws ValidationException, ProcessorException, OutputFormatException {
         FileProcessor.super.validate(opList, fullSize);
 
         if (durationSec < 1) {
@@ -311,25 +304,11 @@ class FfmpegProcessor extends AbstractProcessor implements FileProcessor {
                 throw new ProcessorException(e.getMessage(), e);
             }
         }
-        // Check that the "time" option, if supplied, is in the correct format.
-        final String timeStr = (String) opList.getOptions().get("time");
-        if (timeStr != null) {
-            Matcher matcher = TIME_PATTERN.matcher(timeStr);
-            if (matcher.matches()) {
-                // Check that the supplied time is within the bounds of the
-                // video's duration.
-                final String[] parts = timeStr.split(":");
-                final long seconds = (Integer.parseInt(parts[0]) * 60 * 60) +
-                        (Integer.parseInt(parts[1]) * 60) +
-                        Integer.parseInt(parts[2]);
-                if (seconds > durationSec) {
-                    throw new IllegalArgumentException(
-                            "Time is beyond the length of the video.");
-                }
-            } else {
-                throw new IllegalArgumentException("Invalid time format. " +
-                        "(HH:MM::SS is required.)");
-            }
+        // Check that the supplied "page number" (second offset) is within the
+        // video's duration.
+        if (opList.getPageIndex() > durationSec) {
+            throw new IllegalArgumentException(
+                    "Time is beyond the length of the video.");
         }
     }
 

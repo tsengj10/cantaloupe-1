@@ -11,6 +11,7 @@ import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.operation.Operation;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
+import edu.illinois.library.cantaloupe.operation.ScaleByPixels;
 import edu.illinois.library.cantaloupe.operation.Sharpen;
 import edu.illinois.library.cantaloupe.operation.redaction.Redaction;
 import edu.illinois.library.cantaloupe.operation.overlay.ImageOverlay;
@@ -36,6 +37,8 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.Shape;
+import java.awt.Transparency;
+import java.awt.color.ColorSpace;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphVector;
 import java.awt.geom.AffineTransform;
@@ -44,9 +47,11 @@ import java.awt.image.BufferedImage;
 import java.awt.image.ColorConvertOp;
 import java.awt.image.ColorModel;
 import java.awt.image.ComponentColorModel;
+import java.awt.image.DataBuffer;
 import java.awt.image.WritableRaster;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
 import java.util.Set;
 
 /**
@@ -55,65 +60,11 @@ import java.util.Set;
  * <h1>{@link BufferedImage} Cliff's Notes</h1>
  *
  * <p>{@link BufferedImage}s can have a variety of different internal data
- * layouts that are partially dictated by their {@link BufferedImage#getType()
- * type}, which corresponds to <em>display hardware</em>, not necessarily
- * source image data. All of the standard types are limited to 8 bits per
- * sample; larger sample sizes require {@link BufferedImage#TYPE_CUSTOM}.
- * Unfortunately, whereas operations on many of the standard types (by e.g.
- * {@link Graphics2D}) tend to be well-optimized, that doesn't carry over to
- * {@link BufferedImage#TYPE_CUSTOM} and so most operations on images of this
- * type are relatively slow.</p>
- *
- * <h1>{@link BufferedImage} Type Cheat Sheet</h1>
- *
- * <dl>
- *     <dt>Color (non-indexed)</dt>
- *     <dd>
- *         <dl>
- *             <dt>&le;8 bits</dt>
- *             <dd>
- *                 <dl>
- *                     <dt>Alpha</dt>
- *                     <dd>{@link BufferedImage#TYPE_4BYTE_ABGR},
- *                     {@link BufferedImage#TYPE_INT_ARGB}</dd>
- *                     <dt>No Alpha</dt>
- *                     <dd>{@link BufferedImage#TYPE_3BYTE_BGR},
- *                     {@link BufferedImage#TYPE_INT_RGB},
- *                     {@link BufferedImage#TYPE_INT_BGR}</dd>
- *                 </dl>
- *             </dd>
- *             <dt>&gt;8 bits</dt>
- *             <dd>{@link BufferedImage#TYPE_CUSTOM}</dd>
- *         </dl>
- *     </dd>
- *     <dt>Gray</dt>
- *     <dd>
- *         <dl>
- *             <dt>&le;8 bits</dt>
- *             <dd>
- *                 <dl>
- *                     <dt>Alpha</dt>
- *                     <dd>{@link BufferedImage#TYPE_CUSTOM}</dd>
- *                     <dt>No Alpha</dt>
- *                     <dd>{@link BufferedImage#TYPE_BYTE_GRAY}</dd>
- *                 </dl>
- *             </dd>
- *             <dt>&gt;8 bits</dt>
- *             <dd>
- *                 <dl>
- *                     <dt>Alpha</dt>
- *                     <dd>{@link BufferedImage#TYPE_CUSTOM}</dd>
- *                     <dt>No Alpha</dt>
- *                     <dd>{@link BufferedImage#TYPE_USHORT_GRAY}</dd>
- *                 </dl>
- *             </dd>
- *         </dl>
- *     </dd>
- *     <dt>Bitonal</dt>
- *     <dd>{@link BufferedImage#TYPE_BYTE_BINARY}</dd>
- *     <dt>Indexed</dt>
- *     <dd>{@link BufferedImage#TYPE_BYTE_INDEXED}</dd>
- * </dl>
+ * layouts that are partially characterized by their {@link
+ * BufferedImage#getType() type}, which corresponds more than anything to
+ * <em>display hardware</em>, not necessarily source image data. All of the
+ * standard types are limited to 8 bits per sample; larger sample sizes require
+ * {@link BufferedImage#TYPE_CUSTOM}.</p>
  */
 public final class Java2DUtil {
 
@@ -153,13 +104,17 @@ public final class Java2DUtil {
                                 final double[] preScale,
                                 final ReductionFactor reductionFactor,
                                 final ScaleConstraint scaleConstraint,
-                                final Set<Redaction> redactions) { // TODO: could this method signature get any worse?
+                                final Set<Redaction> redactions) {
         if (image != null && !redactions.isEmpty()) {
             final Stopwatch watch = new Stopwatch();
 
             final Graphics2D g2d = image.createGraphics();
+            // High quality is not needed for drawing solid rectangles.
             g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
-                    RenderingHints.VALUE_RENDER_QUALITY);
+                    RenderingHints.VALUE_RENDER_SPEED);
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_OFF);
+
             g2d.setColor(java.awt.Color.BLACK);
 
             for (final Redaction redaction : redactions) {
@@ -174,7 +129,7 @@ public final class Java2DUtil {
                 redactionRegion.scaleY(preScale[1]);
 
                 if (!redactionRegion.isEmpty()) {
-                    LOGGER.debug("applyRedactions(): applying {} at {},{}/{}x{}",
+                    LOGGER.trace("applyRedactions(): applying {} at {},{}/{}x{}",
                             redaction,
                             redactionRegion.intX(),
                             redactionRegion.intY(),
@@ -182,12 +137,12 @@ public final class Java2DUtil {
                             redactionRegion.intHeight());
                     g2d.fill(redactionRegion.toAWTRectangle());
                 } else {
-                    LOGGER.debug("applyRedactions(): {} is outside crop area; skipping",
+                    LOGGER.trace("applyRedactions(): {} is outside crop area; skipping",
                             redaction);
                 }
             }
             g2d.dispose();
-            LOGGER.debug("applyRedactions() executed in {}", watch);
+            LOGGER.trace("applyRedactions() executed in {}", watch);
         }
     }
 
@@ -212,23 +167,107 @@ public final class Java2DUtil {
     }
 
     /**
+     * @param inImage {@link BufferedImage#TYPE_CUSTOM Custom}-type image to
+     *                convert.
+     * @return New image of the closest non-custom type, or the input image if
+     *         it is not of custom type.
+     */
+    public static BufferedImage convertCustomToRGB(BufferedImage inImage) {
+        BufferedImage outImage = inImage;
+        if (inImage.getType() == BufferedImage.TYPE_CUSTOM) {
+            final Stopwatch watch = new Stopwatch();
+            outImage = new BufferedImage(
+                    inImage.getWidth(), inImage.getHeight(),
+                    inImage.getColorModel().hasAlpha() ?
+                            BufferedImage.TYPE_INT_ARGB :
+                            BufferedImage.TYPE_INT_RGB);
+            Graphics2D g2d = outImage.createGraphics();
+            g2d.drawImage(inImage, 0, 0, null);
+            g2d.dispose();
+            LOGGER.trace("convertCustomToRGB(): executed in {}", watch);
+        }
+        return outImage;
+    }
+
+    /**
      * @param inImage Image to convert.
      * @return New image of type {@link BufferedImage#TYPE_INT_ARGB}, or the
      *         input image if it is not indexed.
      */
-    static BufferedImage convertIndexedTo8BitARGB(BufferedImage inImage) {
+    static BufferedImage convertIndexedToARGB(BufferedImage inImage) {
         BufferedImage outImage = inImage;
         if (inImage.getType() == BufferedImage.TYPE_BYTE_INDEXED) {
             final Stopwatch watch = new Stopwatch();
-
             outImage = new BufferedImage(
                     inImage.getWidth(), inImage.getHeight(),
                     BufferedImage.TYPE_INT_ARGB);
             Graphics2D g2d = outImage.createGraphics();
             g2d.drawImage(inImage, 0, 0, null);
             g2d.dispose();
+            LOGGER.trace("convertIndexedToARGB(): executed in {}", watch);
+        }
+        return outImage;
+    }
 
-            LOGGER.debug("convertIndexedTo8BitARGB(): converted in {}", watch);
+    /**
+     * @param inImage Image to convert.
+     * @return        New image with a linear RGB color space, or the input
+     *                image if it is already in that space.
+     */
+    static BufferedImage convertColorToLinearRGB(BufferedImage inImage) {
+        BufferedImage outImage = inImage;
+
+        final ColorSpace linearCS =
+                ColorSpace.getInstance(ColorSpace.CS_LINEAR_RGB);
+        if (!linearCS.equals(inImage.getColorModel().getColorSpace())) {
+            final Stopwatch watch = new Stopwatch();
+
+            // Create the destination image.
+            ComponentColorModel cm = new ComponentColorModel(
+                    linearCS, false, false,
+                    Transparency.OPAQUE, DataBuffer.TYPE_BYTE);
+            WritableRaster raster = cm.createCompatibleWritableRaster(
+                    inImage.getWidth(), inImage.getHeight());
+            outImage = new BufferedImage(
+                    cm, raster, cm.isAlphaPremultiplied(), null);
+
+            RenderingHints hints = new RenderingHints(null);
+            ColorConvertOp op    = new ColorConvertOp(
+                    inImage.getColorModel().getColorSpace(),
+                    linearCS,
+                    hints);
+            op.filter(inImage, outImage);
+            LOGGER.trace("convertColorToLinearRGB(): executed in {}", watch);
+        }
+        return outImage;
+    }
+
+    /**
+     * @param inImage Image to convert.
+     * @return        New image with sRGB color space, or the input image if it
+     *                is already in that space.
+     */
+    static BufferedImage convertColorToSRGB(BufferedImage inImage) {
+        BufferedImage outImage = inImage;
+
+        final ColorSpace rgbCS = ColorSpace.getInstance(ColorSpace.CS_sRGB);
+        if (!rgbCS.equals(inImage.getColorModel().getColorSpace())) {
+            final Stopwatch watch = new Stopwatch();
+
+            // Create the destination image.
+            outImage = new BufferedImage(
+                    inImage.getWidth(), inImage.getHeight(),
+                    inImage.getColorModel().hasAlpha() ?
+                            BufferedImage.TYPE_4BYTE_ABGR :
+                            BufferedImage.TYPE_3BYTE_BGR);
+
+            RenderingHints hints = new RenderingHints(null);
+            ColorConvertOp op    = new ColorConvertOp(
+                    inImage.getColorModel().getColorSpace(),
+                    rgbCS,
+                    hints);
+            op.filter(inImage, outImage);
+            LOGGER.trace("convertColorToSRGB(): executed in {}", watch);
         }
         return outImage;
     }
@@ -236,10 +275,10 @@ public final class Java2DUtil {
     /**
      * @param image      Image to crop.
      * @param region     Crop region in source image coordinates.
-     * @param copyRaster Whether to copy the underlying raster. If {@literal
-     *                   true}, the crop will be a "hard crop" that creates a
-     *                   whole new image. If {@literal false}, the returned
-     *                   image will share the raster of the given image.
+     * @param copyRaster Whether to copy the underlying raster. If {@code
+     *                   true}, the crop will create a whole new image.
+     *                   Otherwise, the returned image will share the raster of
+     *                   the given image.
      * @return           Cropped image, or the input image if the given region
      *                   is a no-op.
      */
@@ -251,7 +290,7 @@ public final class Java2DUtil {
         } else {
             image = cropVirtually(image, region);
         }
-        return convertIndexedTo8BitARGB(image);
+        return image;
     }
 
     /**
@@ -279,7 +318,7 @@ public final class Java2DUtil {
                     region.intY() + region.intHeight(), null);
             g2d.dispose();
 
-            LOGGER.debug("cropPhysically(): cropped {}x{} image to {}x{} in {}",
+            LOGGER.trace("cropPhysically(): cropped {}x{} image to {}x{} in {}",
                     inImage.getWidth(), inImage.getHeight(),
                     region.intWidth(), region.intHeight(), watch);
         }
@@ -306,7 +345,7 @@ public final class Java2DUtil {
                     region.intX(), region.intY(),
                     region.intWidth(), region.intHeight());
 
-            LOGGER.debug("cropVirtually(): cropped {}x{} image to {}x{} in {}",
+            LOGGER.trace("cropVirtually(): cropped {}x{} image to {}x{} in {}",
                     inImage.getWidth(), inImage.getHeight(),
                     region.intWidth(), region.intHeight(), watch);
         }
@@ -314,21 +353,21 @@ public final class Java2DUtil {
     }
 
     /**
-     * <p>Crops the given image taking into account a reduction factor
-     * ({@literal reductionFactor}). In other words, the dimensions of the
-     * input image have already been halved {@literal reductionFactor} times
-     * but the given region is relative to the full-sized image.</p>
+     * <p>Crops the given image taking into account a reduction factor. (In
+     * other words, the dimensions of the input image have already been halved
+     * {@code reductionFactor} times but the given region is relative to the
+     * full-sized image.</p>
      *
-     * <p>N.B.: This method should only be invoked if {@link
-     * Crop#hasEffect(Dimension, OperationList)} returns {@literal true}.</p>
+     * <p>This method should only be invoked if {@link
+     * Crop#hasEffect(Dimension, OperationList)} returns {@code true}.</p>
      *
      * @param inImage         Image to crop.
      * @param crop            Crop operation. Clients should call {@link
      *                        Operation#hasEffect(Dimension, OperationList)}
      *                        before invoking.
-     * @param rf              Number of times the dimensions of {@literal
-     *                        inImage} have already been halved relative to the
-     *                        full-sized version.
+     * @param rf              Number of times the dimensions of {@code inImage}
+     *                        have already been halved relative to the full-
+     *                        sized version.
      * @param scaleConstraint Scale constraint.
      * @return                Cropped image, or the input image if the given
      *                        region is a no-op. Note that the image is simply
@@ -337,22 +376,22 @@ public final class Java2DUtil {
     static BufferedImage crop(final BufferedImage inImage,
                               final Crop crop,
                               final ReductionFactor rf,
-                              final ScaleConstraint scaleConstraint) {
+                              final ScaleConstraint scaleConstraint,
+                              final boolean copyRaster) {
         final Dimension inSize = new Dimension(
                 inImage.getWidth(), inImage.getHeight());
         final Rectangle roi = crop.getRectangle(inSize, rf, scaleConstraint);
-        return crop(inImage, roi, true);
+        return crop(inImage, roi, copyRaster);
     }
 
     /**
-     * @param overlay
      * @return Overlay image.
      */
     static BufferedImage getOverlayImage(ImageOverlay overlay) {
         ImageReader reader = null;
         try (InputStream is = overlay.openStream()) {
-            reader = new ImageReaderFactory().newImageReader(is, Format.PNG);
-            return reader.read();
+            reader = new ImageReaderFactory().newImageReader(Format.get("png"), is);
+            return reader.read(0);
         } catch (IOException e) {
             LOGGER.warn("{} (skipping overlay)", e.getMessage());
         } finally {
@@ -373,148 +412,195 @@ public final class Java2DUtil {
                                      final BufferedImage overlayImage,
                                      final Position position,
                                      final int inset) {
-        if (overlayImage != null) {
-            final Stopwatch watch = new Stopwatch();
-
-            final Graphics2D g2d = baseImage.createGraphics();
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
-                    RenderingHints.VALUE_RENDER_QUALITY);
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            g2d.drawImage(baseImage, 0, 0, null);
-
-            if (Position.REPEAT.equals(position)) {
-                int startX = Math.round(baseImage.getWidth() / 2f);
-                int startY = Math.round(baseImage.getHeight() / 2f);
-                while (startX >= 0) {
-                    startX -= overlayImage.getWidth();
-                }
-                while (startY >= 0) {
-                    startY -= overlayImage.getHeight();
-                }
-                for (int x = startX; x < baseImage.getWidth(); x += overlayImage.getWidth()) {
-                    for (int y = startY; y < baseImage.getHeight(); y += overlayImage.getHeight()) {
-                        g2d.drawImage(overlayImage, x, y, null);
-                    }
-                }
-            } else {
-                int overlayX, overlayY;
-                switch (position) {
-                    case TOP_LEFT:
-                        overlayX = inset;
-                        overlayY = inset;
-                        break;
-                    case TOP_RIGHT:
-                        overlayX = baseImage.getWidth() -
-                                overlayImage.getWidth() - inset;
-                        overlayY = inset;
-                        break;
-                    case BOTTOM_LEFT:
-                        overlayX = inset;
-                        overlayY = baseImage.getHeight() -
-                                overlayImage.getHeight() - inset;
-                        break;
-                    // case BOTTOM_RIGHT: will be handled in default:
-                    case TOP_CENTER:
-                        overlayX = (baseImage.getWidth() -
-                                overlayImage.getWidth()) / 2;
-                        overlayY = inset;
-                        break;
-                    case BOTTOM_CENTER:
-                        overlayX = (baseImage.getWidth() -
-                                overlayImage.getWidth()) / 2;
-                        overlayY = baseImage.getHeight() -
-                                overlayImage.getHeight() - inset;
-                        break;
-                    case LEFT_CENTER:
-                        overlayX = inset;
-                        overlayY = (baseImage.getHeight() -
-                                overlayImage.getHeight()) / 2;
-                        break;
-                    case RIGHT_CENTER:
-                        overlayX = baseImage.getWidth() -
-                                overlayImage.getWidth() - inset;
-                        overlayY = (baseImage.getHeight() -
-                                overlayImage.getHeight()) / 2;
-                        break;
-                    case CENTER:
-                        overlayX = (baseImage.getWidth() -
-                                overlayImage.getWidth()) / 2;
-                        overlayY = (baseImage.getHeight() -
-                                overlayImage.getHeight()) / 2;
-                        break;
-                    default: // bottom right
-                        overlayX = baseImage.getWidth() -
-                                overlayImage.getWidth() - inset;
-                        overlayY = baseImage.getHeight() -
-                                overlayImage.getHeight() - inset;
-                        break;
-                }
-                g2d.drawImage(overlayImage, overlayX, overlayY, null);
-            }
-            g2d.dispose();
-
-            LOGGER.debug("overlayImage() executed in {}", watch);
+        if (overlayImage == null) {
+            return;
         }
+        final Stopwatch watch = new Stopwatch();
+
+        final Graphics2D g2d = baseImage.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
+                RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.drawImage(baseImage, 0, 0, null);
+
+        if (Position.REPEAT.equals(position)) {
+            int startX = Math.round(baseImage.getWidth() / 2f);
+            int startY = Math.round(baseImage.getHeight() / 2f);
+            while (startX >= 0) {
+                startX -= overlayImage.getWidth();
+            }
+            while (startY >= 0) {
+                startY -= overlayImage.getHeight();
+            }
+            for (int x = startX; x < baseImage.getWidth(); x += overlayImage.getWidth()) {
+                for (int y = startY; y < baseImage.getHeight(); y += overlayImage.getHeight()) {
+                    g2d.drawImage(overlayImage, x, y, null);
+                }
+            }
+        } else if (Position.SCALED.equals(position)) {
+            // We want to scale the overlay to be the size of the image but also respect the inset value.
+            // The inset value will be respected on all sides of the overlay so we want our scale to be the
+            // size of the base image MINUS the size of the inset * 2 in both width and height
+            int calculatedOverlayWidth = baseImage.getWidth() - (inset * 2);
+            int calculatedOverlayHeight = baseImage.getHeight() - (inset * 2);
+            ScaleByPixels scale = new ScaleByPixels(
+                    (calculatedOverlayWidth > 0) ? calculatedOverlayWidth : baseImage.getWidth(),
+                    (calculatedOverlayHeight > 0) ? calculatedOverlayHeight : baseImage.getHeight(),
+                    ScaleByPixels.Mode.ASPECT_FIT_INSIDE);
+            ScaleConstraint sc = new ScaleConstraint(1, 1);
+            ReductionFactor rf = new ReductionFactor(1);
+            BufferedImage scaledOverlay = Java2DUtil.scale(overlayImage, scale, sc, rf, false);
+            int xOffset = inset;
+            int yOffset = inset;
+            if (scaledOverlay.getWidth() < baseImage.getWidth()) {
+                xOffset = Math.round((baseImage.getWidth() - scaledOverlay.getWidth()) / 2f);
+            }
+            if (scaledOverlay.getHeight() < baseImage.getHeight()) {
+                yOffset = Math.round((baseImage.getHeight() - scaledOverlay.getHeight()) / 2f);
+            }
+            g2d.drawImage(Java2DUtil.scale(overlayImage, scale, sc, rf, false),
+                    xOffset, yOffset, null);
+        } else {
+            int overlayX, overlayY;
+            switch (position) {
+                case TOP_LEFT:
+                    overlayX = inset;
+                    overlayY = inset;
+                    break;
+                case TOP_RIGHT:
+                    overlayX = baseImage.getWidth() -
+                            overlayImage.getWidth() - inset;
+                    overlayY = inset;
+                    break;
+                case BOTTOM_LEFT:
+                    overlayX = inset;
+                    overlayY = baseImage.getHeight() -
+                            overlayImage.getHeight() - inset;
+                    break;
+                // case BOTTOM_RIGHT: will be handled in default:
+                case TOP_CENTER:
+                    overlayX = (baseImage.getWidth() -
+                            overlayImage.getWidth()) / 2;
+                    overlayY = inset;
+                    break;
+                case BOTTOM_CENTER:
+                    overlayX = (baseImage.getWidth() -
+                            overlayImage.getWidth()) / 2;
+                    overlayY = baseImage.getHeight() -
+                            overlayImage.getHeight() - inset;
+                    break;
+                case LEFT_CENTER:
+                    overlayX = inset;
+                    overlayY = (baseImage.getHeight() -
+                            overlayImage.getHeight()) / 2;
+                    break;
+                case RIGHT_CENTER:
+                    overlayX = baseImage.getWidth() -
+                            overlayImage.getWidth() - inset;
+                    overlayY = (baseImage.getHeight() -
+                            overlayImage.getHeight()) / 2;
+                    break;
+                case CENTER:
+                    overlayX = (baseImage.getWidth() -
+                            overlayImage.getWidth()) / 2;
+                    overlayY = (baseImage.getHeight() -
+                            overlayImage.getHeight()) / 2;
+                    break;
+                default: // bottom right
+                    overlayX = baseImage.getWidth() -
+                            overlayImage.getWidth() - inset;
+                    overlayY = baseImage.getHeight() -
+                            overlayImage.getHeight() - inset;
+                    break;
+            }
+            g2d.drawImage(overlayImage, overlayX, overlayY, null);
+        }
+        g2d.dispose();
+
+        LOGGER.trace("overlayImage() executed in {}", watch);
     }
 
     /**
-     * Overlays a string onto an image.
+     * <p>Overlays a string onto an image.</p>
      *
-     * @param baseImage Image to overlay the string onto.
-     * @param overlay   String to overlay onto the image.
+     * <p>There are two main layout strategies, depending on {@link
+     * StringOverlay#isWordWrap()}:</p>
+     *
+     * <ol>
+     *     <li>With the word wrap strategy, the font size is fixed, the
+     *     available width is the full width of the image, and the height is
+     *     whatever needed to accommodate the wrapped lines.</li>
+     *     <li>With the other strategy, the largest font size that enables the
+     *     string to fit entirely within the image is used, down to a
+     *     configured minimum size.</li>
+     * </ol>
+     *
+     * @param baseImage Image to overlay a string onto.
+     * @param overlay   Overlay to apply to the image.
      */
     private static void overlayString(final BufferedImage baseImage,
                                       final StringOverlay overlay) {
-        if (overlay.hasEffect()) {
-            final Stopwatch watch = new Stopwatch();
+        if (!overlay.hasEffect()) {
+            return;
+        }
+        final Stopwatch watch = new Stopwatch();
 
-            final Graphics2D g2d = baseImage.createGraphics();
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                    RenderingHints.VALUE_TEXT_ANTIALIAS_GASP);
-            g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS,
-                    RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,
-                    RenderingHints.VALUE_STROKE_PURE);
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
-                    RenderingHints.VALUE_RENDER_QUALITY);
+        final Graphics2D g2d = baseImage.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                RenderingHints.VALUE_TEXT_ANTIALIAS_GASP);
+        g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS,
+                RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,
+                RenderingHints.VALUE_STROKE_PURE);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
+                RenderingHints.VALUE_RENDER_QUALITY);
 
-            // Graphics2D.drawString() does not understand newlines. Each line
-            // has to be drawn separately.
-            Font font = overlay.getFont();
-            float fontSize = font.getSize();
-            final int inset = overlay.getInset();
-            final String[] lines = StringUtils.split(overlay.getString(), "\n");
-            final int padding = getBoxPadding(overlay);
-            int lineHeight;
-            int totalHeight;
-            int[] lineWidths;
-            int maxLineWidth;
-            boolean fits = false;
+        // Graphics2D.drawString() doesn't understand newlines. Each line must
+        // be drawn separately.
+        Font font                 = overlay.getFont();
+        float fontSize            = font.getSize();
+        final int inset           = overlay.getInset();
+        final int padding         = getBoxPadding(overlay);
+        final int availableWidth  = baseImage.getWidth() - (inset * 2) - (padding * 2);
+        final int availableHeight = baseImage.getHeight() - (inset * 2) - (padding * 2);
+        boolean fits              = false;
+        String[] lines;
+        int[] lineWidths;
+        int maxLineWidth, lineHeight, totalHeight;
 
+        if (overlay.isWordWrap()) {
+            g2d.setFont(font);
+            final FontMetrics fm = g2d.getFontMetrics();
+            lines = edu.illinois.library.cantaloupe.util.StringUtils
+                    .wrap(overlay.getString(), fm, availableWidth)
+                    .toArray(String[]::new);
+            lineHeight   = fm.getHeight();
+            totalHeight  = lineHeight * lines.length;
+            lineWidths   = getLineWidths(lines, fm);
+            maxLineWidth = Arrays.stream(lineWidths).max().orElse(0);
+
+            if (totalHeight <= availableHeight) {
+                fits = true;
+            }
+        } else {
+            lines = StringUtils.split(overlay.getString(), "\n");
             // Starting at the initial font size, loop through smaller sizes
             // down to the minimum in order to find the largest that will fit
             // entirely within the image.
             while (true) {
-                maxLineWidth = 0;
                 g2d.setFont(font);
                 final FontMetrics fm = g2d.getFontMetrics();
-                lineHeight = fm.getHeight();
-                totalHeight = lineHeight * lines.length;
-                // Find the max line width.
-                lineWidths = new int[lines.length];
-                for (int i = 0; i < lines.length; i++) {
-                    lineWidths[i] = fm.stringWidth(lines[i]);
-                    if (lineWidths[i] > maxLineWidth) {
-                        maxLineWidth = lineWidths[i];
-                    }
-                }
+                lineHeight   = fm.getHeight();
+                totalHeight  = lineHeight * lines.length;
+                lineWidths   = getLineWidths(lines, fm);
+                maxLineWidth = Arrays.stream(lineWidths).max().orElse(0);
 
                 // Will the overlay fit inside the image?
-                if (maxLineWidth + (inset * 2) + (padding * 2) <= baseImage.getWidth() &&
-                        totalHeight + (inset * 2) + (padding * 2) <= baseImage.getHeight()) {
+                if (maxLineWidth <= availableWidth &&
+                        totalHeight <= availableHeight) {
                     fits = true;
                     break;
                 } else {
@@ -526,96 +612,106 @@ public final class Java2DUtil {
                     }
                 }
             }
-
-            if (fits) {
-                LOGGER.debug("overlayString(): using {}-point font ({} min; {} max)",
-                        fontSize, overlay.getMinSize(),
-                        overlay.getFont().getSize());
-
-                g2d.drawImage(baseImage, 0, 0, null);
-
-                final Rectangle bgBox = getBoundingBox(overlay, inset,
-                        lineWidths, lineHeight,
-                        new Dimension(baseImage.getWidth(), baseImage.getHeight()));
-
-                // Draw the background, if it is not transparent.
-                if (overlay.getBackgroundColor().getAlpha() > 0) {
-                    g2d.setPaint(overlay.getBackgroundColor().toColor());
-                    g2d.fillRect(bgBox.intX(), bgBox.intY(),
-                            bgBox.intWidth(), bgBox.intHeight());
-                }
-
-                // Draw each line individually.
-                for (int i = 0; i < lines.length; i++) {
-                    double x, y;
-                    switch (overlay.getPosition()) {
-                        case TOP_LEFT:
-                            x = bgBox.x() + padding;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        case TOP_RIGHT:
-                            x = bgBox.x() + maxLineWidth - lineWidths[i] + padding;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        case BOTTOM_LEFT:
-                            x = bgBox.x() + padding;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        // case BOTTOM_RIGHT: will be handled in default:
-                        case TOP_CENTER:
-                            x = bgBox.x() + (bgBox.width() - lineWidths[i]) / 2.0;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        case BOTTOM_CENTER:
-                            x = bgBox.x() + (bgBox.width() - lineWidths[i]) / 2.0;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        case LEFT_CENTER:
-                            x = bgBox.x() + padding;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        case RIGHT_CENTER:
-                            x = bgBox.x() + maxLineWidth - lineWidths[i] + padding;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        case CENTER:
-                            x = bgBox.x() + (bgBox.width() - lineWidths[i]) / 2.0;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                        default: // bottom right
-                            x = bgBox.x() + maxLineWidth - lineWidths[i] + padding;
-                            y = bgBox.y() + lineHeight * i + padding;
-                            break;
-                    }
-
-                    // This is arbitrary fudge, but it seems to work OK.
-                    y += lineHeight * 0.73;
-
-                    // Draw the text outline.
-                    if (overlay.getStrokeWidth() > 0.001) {
-                        final FontRenderContext frc = g2d.getFontRenderContext();
-                        final GlyphVector gv = font.createGlyphVector(frc, lines[i]);
-                        final Shape shape = gv.getOutline(Math.round(x), Math.round(y));
-                        g2d.setStroke(new BasicStroke(overlay.getStrokeWidth()));
-                        g2d.setPaint(overlay.getStrokeColor().toColor());
-                        g2d.draw(shape);
-                    }
-
-                    // Draw the string.
-                    g2d.setPaint(overlay.getColor().toColor());
-                    g2d.drawString(lines[i], Math.round(x), Math.round(y));
-                }
-                LOGGER.debug("overlayString() executed in {}", watch);
-            } else {
-                LOGGER.debug("overlayString(): {}-point ({}x{}) text won't fit in {}x{} image",
-                        fontSize,
-                        maxLineWidth + inset,
-                        totalHeight + inset,
-                        baseImage.getWidth(),
-                        baseImage.getHeight());
-            }
-            g2d.dispose();
         }
+
+        if (!fits) {
+            LOGGER.trace("overlayString(): {}-point ({}x{}) text won't fit in {}x{} image",
+                    fontSize,
+                    maxLineWidth + inset,
+                    totalHeight + inset,
+                    baseImage.getWidth(),
+                    baseImage.getHeight());
+            g2d.dispose();
+            return;
+        }
+
+        LOGGER.trace("overlayString(): using {}-point font ({} min; {} max)",
+                fontSize, overlay.getMinSize(),
+                overlay.getFont().getSize());
+
+        g2d.drawImage(baseImage, 0, 0, null);
+
+        final Rectangle bgBox = getBoundingBox(overlay, inset,
+                lineWidths, lineHeight,
+                new Dimension(baseImage.getWidth(), baseImage.getHeight()));
+
+        // Draw the background if it is not transparent.
+        if (overlay.getBackgroundColor().getAlpha() > 0) {
+            g2d.setPaint(overlay.getBackgroundColor().toColor());
+            g2d.fillRect(bgBox.intX(), bgBox.intY(),
+                    bgBox.intWidth(), bgBox.intHeight());
+        }
+
+        // Draw each line individually.
+        for (int i = 0; i < lines.length; i++) {
+            double x, y;
+            switch (overlay.getPosition()) {
+                case TOP_LEFT:
+                    x = bgBox.x() + padding;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                case TOP_RIGHT:
+                    x = bgBox.x() + maxLineWidth - lineWidths[i] + padding;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                case BOTTOM_LEFT:
+                    x = bgBox.x() + padding;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                // BOTTOM_RIGHT is handled in default:
+                case TOP_CENTER:
+                    x = bgBox.x() + (bgBox.width() - lineWidths[i]) / 2.0;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                case BOTTOM_CENTER:
+                    x = bgBox.x() + (bgBox.width() - lineWidths[i]) / 2.0;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                case LEFT_CENTER:
+                    x = bgBox.x() + padding;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                case RIGHT_CENTER:
+                    x = bgBox.x() + maxLineWidth - lineWidths[i] + padding;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                case CENTER:
+                    x = bgBox.x() + (bgBox.width() - lineWidths[i]) / 2.0;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+                default: // bottom right
+                    x = bgBox.x() + maxLineWidth - lineWidths[i] + padding;
+                    y = bgBox.y() + lineHeight * i + padding;
+                    break;
+            }
+
+            // This is arbitrary fudge, but it seems to work OK.
+            y += lineHeight * 0.73;
+
+            // Draw the text outline.
+            if (overlay.getStrokeWidth() > 0.001) {
+                final FontRenderContext frc = g2d.getFontRenderContext();
+                final GlyphVector gv = font.createGlyphVector(frc, lines[i]);
+                final Shape shape = gv.getOutline(Math.round(x), Math.round(y));
+                g2d.setStroke(new BasicStroke(overlay.getStrokeWidth()));
+                g2d.setPaint(overlay.getStrokeColor().toColor());
+                g2d.draw(shape);
+            }
+
+            // Draw the string.
+            g2d.setPaint(overlay.getColor().toColor());
+            g2d.drawString(lines[i], Math.round(x), Math.round(y));
+        }
+        g2d.dispose();
+        LOGGER.trace("overlayString() executed in {}", watch);
+    }
+
+    private static int[] getLineWidths(String[] lines, FontMetrics fm) {
+        final int[] lineWidths = new int[lines.length];
+        for (int i = 0; i < lines.length; i++) {
+            lineWidths[i] = fm.stringWidth(lines[i]);
+        }
+        return lineWidths;
     }
 
     private static Rectangle getBoundingBox(final StringOverlay overlay,
@@ -658,7 +754,6 @@ public final class Java2DUtil {
                 boxX = inset;
                 boxY = imageSize.height() - boxHeight - inset - padding;
                 break;
-            // case BOTTOM_RIGHT: will be handled in default:
             case BOTTOM_CENTER:
                 boxX = (imageSize.width() - boxWidth) / 2.0;
                 boxY = imageSize.height() - boxHeight - inset - padding;
@@ -676,32 +771,31 @@ public final class Java2DUtil {
     }
 
     /**
-     * @param colorModel Color model of the new image.
      * @param width      Width of the new image.
      * @param height     Height of the new image.
-     * @param forceAlpha Whether the resulting image should definitely have
-     *                   alpha.
+     * @param colorModel Color model of the new image.
+     * @param alpha      Whether the resulting image should have alpha.
      * @return           New image with the given color model and dimensions.
      */
-    private static BufferedImage newImage(ColorModel colorModel,
-                                          final int width,
+    private static BufferedImage newImage(final int width,
                                           final int height,
-                                          final boolean forceAlpha) {
+                                          ColorModel colorModel,
+                                          final boolean alpha) {
         final boolean isAlphaPremultiplied = colorModel.isAlphaPremultiplied();
 
-        // Manually create a compatible ColorModel respecting forceAlpha.
+        // Create a compatible ColorModel.
         if (colorModel instanceof ComponentColorModel) {
             int[] componentSizes = colorModel.getComponentSize();
             // If the array does not contain an alpha element but we need it,
             // add it.
-            if (!colorModel.hasAlpha() && forceAlpha) {
+            if (!colorModel.hasAlpha() && alpha) {
                 int[] tmp = new int[componentSizes.length + 1];
                 System.arraycopy(componentSizes, 0, tmp, 0, componentSizes.length);
                 tmp[tmp.length - 1] = tmp[0];
                 componentSizes = tmp;
             }
             colorModel = new ComponentColorModel(colorModel.getColorSpace(),
-                    componentSizes, forceAlpha, isAlphaPremultiplied,
+                    componentSizes, alpha, isAlphaPremultiplied,
                     colorModel.getTransparency(), colorModel.getTransferType());
         }
 
@@ -739,60 +833,37 @@ public final class Java2DUtil {
                     inColorModel.getColorSpace(),
                     outImage.getColorModel().getColorSpace(), null);
             outImage.createGraphics().drawImage(inImage, op, 0, 0);
-            LOGGER.debug("reduceTo8Bits(): converted in {}", watch);
+            LOGGER.trace("reduceTo8Bits(): executed in {}", watch);
         }
         return outImage;
     }
 
     /**
-     * Removes alpha from an image. Transparent regions will be blended with an
-     * undefined color. This involves copying the given image into a new
-     * {@link BufferedImage}, which is expensive.
+     * Creates a new image without alpha, paints the given background color
+     * into it, draws the RGB channels of the given image into it, and returns
+     * it.
      *
-     * @param inImage Image to remove the alpha channel from.
-     * @return        Alpha-flattened image, or the input image if it has no
-     *                alpha.
-     */
-    public static BufferedImage removeAlpha(final BufferedImage inImage) {
-        return removeAlpha(inImage, null);
-    }
-
-    /**
-     * Removes alpha from an image, blending transparent regions with the given
-     * color. This involves copying the given image into a new {@link
-     * BufferedImage}, which is expensive.
-     *
-     * @param inImage Image to remove the alpha channel from.
-     * @return        Alpha-flattened image, or the input image if it has no
-     *                alpha.
+     * @param inImage Image with alpha.
+     * @return        Flattened image, or the input image if it has no alpha.
      */
     public static BufferedImage removeAlpha(final BufferedImage inImage,
                                             final Color bgColor) {
         BufferedImage outImage = inImage;
-
         if (inImage.getColorModel().hasAlpha()) {
             final Stopwatch watch = new Stopwatch();
-            int newType;
-            switch (inImage.getType()) {
-                case BufferedImage.TYPE_4BYTE_ABGR:
-                    newType = BufferedImage.TYPE_INT_BGR;
-                    break;
-                default:
-                    newType = BufferedImage.TYPE_INT_RGB;
-                    break;
-            }
+
             outImage = new BufferedImage(inImage.getWidth(),
-                    inImage.getHeight(), newType);
-            Graphics2D g = outImage.createGraphics();
+                    inImage.getHeight(), BufferedImage.TYPE_INT_RGB);
+            Graphics2D g2d = outImage.createGraphics();
 
             if (bgColor != null) {
-                g.setBackground(bgColor.toColor());
-                g.clearRect(0, 0, inImage.getWidth(), inImage.getHeight());
+                g2d.setBackground(bgColor.toColor());
+                g2d.clearRect(0, 0, inImage.getWidth(), inImage.getHeight());
             }
 
-            g.drawImage(inImage, 0, 0, null);
-            g.dispose();
-            LOGGER.debug("removeAlpha(): executed in {}", watch);
+            g2d.drawImage(inImage, 0, 0, null);
+            g2d.dispose();
+            LOGGER.trace("removeAlpha(): executed in {}", watch);
         }
         return outImage;
     }
@@ -815,24 +886,11 @@ public final class Java2DUtil {
     /**
      * @param inImage Image to rotate.
      * @param rotate  Rotate operation.
-     * @return        Rotated image, or the input image if the given rotation
-     *                is a no-op.
+     * @return        Rotated image, or the input image if the given
+     *                rotation is a no-op.  The image has alpha.
      */
     static BufferedImage rotate(final BufferedImage inImage,
                                 final Rotate rotate) {
-        return rotate(inImage, rotate, null);
-    }
-
-    /**
-     * @param inImage         Image to rotate.
-     * @param rotate          Rotate operation.
-     * @param backgroundColor Color to paint underneath the image.
-     * @return                Rotated image, or the input image if the given
-     *                        rotation is a no-op.
-     */
-    static BufferedImage rotate(final BufferedImage inImage,
-                                final Rotate rotate,
-                                final Color backgroundColor) {
         BufferedImage outImage = inImage;
         if (rotate.hasEffect()) {
             final Stopwatch watch = new Stopwatch();
@@ -855,42 +913,43 @@ public final class Java2DUtil {
             // 1. translate the image so that it is rotated about the center
             tx.translate(-sourceWidth / 2f, -sourceHeight / 2f);
 
-            switch (inImage.getType()) {
-                case BufferedImage.TYPE_CUSTOM:
-                    outImage = newImage(inImage.getColorModel(),
-                            canvasWidth, canvasHeight, true);
-                    break;
-                case BufferedImage.TYPE_BYTE_BINARY:
+            final int compSize      = inImage.getColorModel().getComponentSize(0);
+            final int numComponents = inImage.getColorModel().getNumComponents();
+
+            // AffineTransformOp should be faster, but the G2D drawing method
+            // is more compatible.
+            if (compSize > 8 || numComponents < 3) {
+                if (compSize > 8) {
+                    outImage = newImage(canvasWidth, canvasHeight,
+                            inImage.getColorModel(), true);
+                } else {
                     outImage = new BufferedImage(
                             canvasWidth, canvasHeight,
                             BufferedImage.TYPE_INT_ARGB);
-                    break;
-                case BufferedImage.TYPE_USHORT_GRAY:
-                    outImage = newImage(inImage.getColorModel(),
-                            canvasWidth, canvasHeight, true);
-                    break;
-                default:
-                    outImage = new BufferedImage(
-                            canvasWidth, canvasHeight,
-                            BufferedImage.TYPE_INT_ARGB);
-                    break;
+                }
+
+                final Graphics2D g2d = outImage.createGraphics();
+                g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
+                        RenderingHints.VALUE_RENDER_SPEED);
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+
+                g2d.drawImage(inImage, tx, null);
+                g2d.dispose();
+            } else {
+                // informal test with 6000^2 image:
+                // NN 14 sec, bilinear 15 sec, bicubic 16 sec
+                // We'll use NN assuming that anyone doing non-right-angle
+                // rotation does not require super high quality.
+                AffineTransformOp op = new AffineTransformOp(
+                        tx, AffineTransformOp.TYPE_NEAREST_NEIGHBOR);
+                outImage = new BufferedImage(canvasWidth, canvasHeight,
+                        BufferedImage.TYPE_INT_ARGB);
+                op.filter(inImage, outImage);
             }
-
-            final Graphics2D g2d = outImage.createGraphics();
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
-                    RenderingHints.VALUE_RENDER_QUALITY);
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-
-            if (backgroundColor != null) {
-                g2d.setBackground(backgroundColor.toColor());
-                g2d.clearRect(0, 0, outImage.getWidth(), outImage.getHeight());
-            }
-
-            g2d.drawImage(inImage, tx, null);
-            LOGGER.debug("rotate(): executed in {}", watch);
+            LOGGER.trace("rotate(): executed in {}", watch);
         }
         return outImage;
     }
@@ -902,8 +961,7 @@ public final class Java2DUtil {
      * relative to the full-sized image.</p>
      *
      * <p>If one or both target dimensions would end up being less than three
-     * pixels, an empty image (with the correct dimensions) will be
-     * returned.</p>
+     * pixels, an empty image (with the correct dimensions) is returned.</p>
      *
      * @param inImage         Image to scale.
      * @param scale           Requested size ignoring any reduction factor. If
@@ -914,13 +972,16 @@ public final class Java2DUtil {
      * @param scaleConstraint Scale constraint.
      * @param reductionFactor Reduction factor that has already been applied to
      *                        {@literal inImage}.
+     * @param isLinear        Whether the provided image is in a linear color
+     *                        space.
      * @return                Scaled image, or the input image if the given
      *                        arguments would result in a no-op.
      */
-    static BufferedImage scale(final BufferedImage inImage,
+    static BufferedImage scale(BufferedImage inImage,
                                final Scale scale,
                                final ScaleConstraint scaleConstraint,
-                               final ReductionFactor reductionFactor) {
+                               final ReductionFactor reductionFactor,
+                               final boolean isLinear) {
         /*
         This method uses resampling code derived from
         com.mortennobel.imagescaling (see
@@ -981,7 +1042,8 @@ public final class Java2DUtil {
                 final Stopwatch watch = new Stopwatch();
 
                 final ResampleOp resampleOp = new ResampleOp(
-                        targetSize.intWidth(), targetSize.intHeight());
+                        targetSize.intWidth(), targetSize.intHeight(),
+                        isLinear);
 
                 // Try to use the requested resample filter.
                 ResampleFilter filter = null;
@@ -1001,13 +1063,14 @@ public final class Java2DUtil {
 
                 scaledImage = resampleOp.filter(inImage, null);
 
-                LOGGER.debug("scale(): scaled {}x{} image to {}x{} using " +
+                LOGGER.trace("scale(): scaled {}x{} image to {}x{} using " +
                                 "a {} filter in {}",
                         sourceSize.intWidth(), sourceSize.intHeight(),
                         targetSize.intWidth(), targetSize.intHeight(),
                         filter.getName(), watch);
             }
         } else {
+            // Dummy image.
             scaledImage = new BufferedImage(
                     targetSize.intWidth(),
                     targetSize.intHeight(),
@@ -1029,14 +1092,14 @@ public final class Java2DUtil {
                 final Stopwatch watch = new Stopwatch();
 
                 final ResampleOp resampleOp = new ResampleOp(
-                        inImage.getWidth(), inImage.getHeight());
+                        inImage.getWidth(), inImage.getHeight(), false);
                 resampleOp.setUnsharpenMask((float) sharpen.getAmount());
                 sharpenedImage = resampleOp.filter(inImage, null);
 
-                LOGGER.debug("sharpen(): sharpened by {} in {}",
+                LOGGER.trace("sharpen(): sharpened by {} in {}",
                         sharpen.getAmount(), watch);
             } else {
-                LOGGER.debug("sharpen(): image must be at least 3 " +
+                LOGGER.trace("sharpen(): image must be at least 3 " +
                         "pixels on a side; skipping");
             }
         }
@@ -1056,16 +1119,16 @@ public final class Java2DUtil {
 
         switch (colorTransform) {
             case GRAY:
-                outImage = convertIndexedTo8BitARGB(outImage);
+                outImage = convertIndexedToARGB(outImage);
                 grayscale(outImage);
                 break;
             case BITONAL:
-                outImage = convertIndexedTo8BitARGB(outImage);
+                outImage = convertIndexedToARGB(outImage);
                 binarize(outImage);
                 break;
         }
         if (outImage != inImage) {
-            LOGGER.debug("transformColor(): transformed {}x{} image in {}",
+            LOGGER.trace("transformColor(): transformed {}x{} image in {}",
                     inImage.getWidth(), inImage.getHeight(), watch);
         }
         return outImage;
@@ -1075,16 +1138,16 @@ public final class Java2DUtil {
      * Grayscales the given image's pixels.
      */
     private static void grayscale(BufferedImage image) {
-        for (int x = 0; x < image.getWidth(); x++) {
-            for (int j = 0; j < image.getHeight(); j++) {
-                int alpha = new java.awt.Color(image.getRGB(x, j)).getAlpha();
-                int red   = new java.awt.Color(image.getRGB(x, j)).getRed();
-                int green = new java.awt.Color(image.getRGB(x, j)).getGreen();
-                int blue  = new java.awt.Color(image.getRGB(x, j)).getBlue();
-
-                red = (int) (0.21 * red + 0.71 * green + 0.07 * blue);
-                Color color = new Color(red, red, red, alpha);
-                image.setRGB(x, j, color.intValue());
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int argb  = image.getRGB(x, y);
+                int alpha = (argb >> 24) & 0xff;
+                int red   = (argb >> 16) & 0xff;
+                int green = (argb >> 8) & 0xff;
+                int blue  = argb & 0xff;
+                int luma  = (int) (0.21 * red + 0.71 * green + 0.07 * blue);
+                argb      = (alpha << 24) | (luma << 16) | (luma << 8) | luma;
+                image.setRGB(x, y, argb);
             }
         }
     }
@@ -1110,7 +1173,7 @@ public final class Java2DUtil {
                     newPixel = 0;
                 }
                 Color color = new Color(newPixel, newPixel, newPixel, alpha);
-                image.setRGB(x, y, color.intValue());
+                image.setRGB(x, y, color.getARGB());
             }
         }
     }
@@ -1120,11 +1183,6 @@ public final class Java2DUtil {
      */
     private static int[] histogram(BufferedImage input) {
         int[] histogram = new int[256];
-
-        for (int i = 0; i < histogram.length; i++) {
-            histogram[i] = 0;
-        }
-
         for (int x = 0; x < input.getWidth(); x++) {
             for (int y = 0; y < input.getHeight(); y++) {
                 int red = new Color(input.getRGB(x, y)).getRed();
@@ -1135,7 +1193,6 @@ public final class Java2DUtil {
     }
 
     /**
-     * @param image
      * @return Binary threshold using Otsu's method.
      */
     private static int otsuThreshold(BufferedImage image) {
@@ -1175,7 +1232,6 @@ public final class Java2DUtil {
                 threshold = i;
             }
         }
-
         return threshold;
     }
 
@@ -1197,10 +1253,10 @@ public final class Java2DUtil {
                 break;
         }
         AffineTransformOp op = new AffineTransformOp(tx,
-                AffineTransformOp.TYPE_BILINEAR);
+                AffineTransformOp.TYPE_NEAREST_NEIGHBOR);
         BufferedImage outImage = op.filter(inImage, null);
 
-        LOGGER.debug("transpose(): transposed image in {}", watch);
+        LOGGER.trace("transpose(): executed in {}", watch);
         return outImage;
     }
 

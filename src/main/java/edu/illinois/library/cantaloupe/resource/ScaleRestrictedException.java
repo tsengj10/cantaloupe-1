@@ -4,10 +4,14 @@ import edu.illinois.library.cantaloupe.http.Status;
 
 public class ScaleRestrictedException extends ResourceException {
 
-    public ScaleRestrictedException(double maxScale) {
-        super(Status.FORBIDDEN,
-                String.format("Requests for scales in excess of %d%% are not allowed.",
-                        Math.round(maxScale * 100)));
+    public ScaleRestrictedException(Status status, double maxScale) {
+        super(status, String.format(
+                "Requests for scales in excess of %d%% are not allowed.",
+                Math.round(maxScale * 100)));
+    }
+
+    public ScaleRestrictedException(String message, Status status) {
+        super(status, message);
     }
 
 }

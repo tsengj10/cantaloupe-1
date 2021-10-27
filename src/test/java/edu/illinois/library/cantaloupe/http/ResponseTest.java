@@ -1,74 +1,72 @@
 package edu.illinois.library.cantaloupe.http;
 
+import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.WebServer;
-import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.HttpClientTransport;
-import org.eclipse.jetty.client.api.ContentResponse;
-import org.eclipse.jetty.client.api.Request;
-import org.eclipse.jetty.client.http.HttpClientTransportOverHTTP;
-import org.eclipse.jetty.http.HttpField;
-import org.eclipse.jetty.http.HttpMethod;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 
-public class ResponseTest {
+import static org.junit.jupiter.api.Assertions.*;
 
-    private HttpClient jettyClient;
+public class ResponseTest extends BaseTest {
+
+    private HttpClient javaClient;
     private WebServer server;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
+        super.setUp();
         server = new WebServer();
         server.start();
 
-        HttpClientTransport transport = new HttpClientTransportOverHTTP();
-        jettyClient = new HttpClient(transport, new SslContextFactory());
-        jettyClient.start();
-        jettyClient.setFollowRedirects(false);
+        javaClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
     }
 
-    @After
+    @AfterEach
     public void tearDown() throws Exception {
-        try {
-            server.stop();
-        } finally {
-            jettyClient.stop();
-        }
+        super.tearDown();
+        server.stop();
     }
 
     @Test
-    public void testFromJettyResponse() throws Exception {
-        Request request = jettyClient.newRequest(
-                server.getHTTPURI().resolve("/jpg"));
-        request.method(HttpMethod.GET);
+    void testFromHttpClientResponse() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .GET()
+                .uri(server.getHTTPURI().resolve("/jpg"))
+                .build();
 
-        ContentResponse jresponse = request.send();
+        HttpResponse<byte[]> jresponse = javaClient.send(
+                request, HttpResponse.BodyHandlers.ofByteArray());
 
-        Response response = Response.fromJettyResponse(jresponse);
+        Response response = Response.fromHttpClientResponse(jresponse);
 
-        assertEquals(jresponse.getContent(), response.getBody());
-        assertEquals(jresponse.getStatus(), response.getStatus());
-        assertEquals(Transport.HTTP1_1, response.getTransport());
+        assertEquals(jresponse.body(), response.getBody());
+        assertEquals(jresponse.statusCode(), response.getStatus());
+        assertEquals(Transport.HTTP2_0, response.getTransport());
 
         Headers expectedHeaders = new Headers();
-        for (HttpField field : jresponse.getHeaders()) {
-            expectedHeaders.add(field.getName(), field.getValue());
-        }
+        jresponse.headers().map().forEach((name, list) ->
+                list.forEach(h ->
+                        expectedHeaders.add(name, h)));
 
         assertEquals(expectedHeaders, response.getHeaders());
     }
 
     @Test
-    public void testGetBodyAsString() throws Exception {
-        final byte[] body = "cats".getBytes("UTF-8");
+    void testGetBodyAsString() {
+        final byte[] body = "cats".getBytes(StandardCharsets.UTF_8);
 
         Response response = new Response();
         response.setBody(body);
-        assertEquals(new String(body, "UTF-8"), response.getBodyAsString());
+        assertEquals(new String(body, StandardCharsets.UTF_8),
+                response.getBodyAsString());
     }
 
 }

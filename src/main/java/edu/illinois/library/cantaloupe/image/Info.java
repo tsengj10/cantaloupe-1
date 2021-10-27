@@ -1,13 +1,15 @@
 package edu.illinois.library.cantaloupe.image;
 
-import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
+import edu.illinois.library.cantaloupe.Application;
 import edu.illinois.library.cantaloupe.cache.DerivativeCache;
 import edu.illinois.library.cantaloupe.processor.Processor;
 
@@ -16,45 +18,46 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * <p>Contains JSON-serializable information about an image, including its
- * format, dimensions, orientation, subimages, and tile sizes&mdash;
+ * format, dimensions, embedded metadata, subimages, and tile sizes&mdash;
  * essentially a superset of characteristics of all {@link Format formats}
  * supported by the application.</p>
  *
- * <p>Instances are format- and processor-agnostic. An instance describing a
- * particular image {@link Processor#readInfo() returned from one
- * processor} should be {@link #equals(Object) equal} to an instance describing
- * the same image returned from a different processor. This preserves the
- * freedom to change processor assignments without invalidating any
- * {@link DerivativeCache#getImageInfo(Identifier) cached instances}.</p>
+ * <p>Instances are format-, {@link Processor}-, and endpoint-agnostic. An
+ * instance describing a particular image {@link Processor#readInfo() returned
+ * from one processor} should be {@link #equals equal} to an instance
+ * describing the same image returned from a different processor. This
+ * preserves the freedom to change processor assignments without invalidating
+ * any {@link DerivativeCache#getInfo(Identifier) cached instances}.</p>
  *
  * <p>All sizes are raw pixel data sizes, disregarding orientation.</p>
  *
  * <p>Instances ultimately originate from {@link Processor#readInfo()}, but
  * subsequently they can be {@link DerivativeCache#put(Identifier, Info)
- * cached}, perhaps for a very long time. For efficiency's sake, when an
- * instance is needed, it will be preferentially acquired from a cache, and a
- * processor will be consulted only as a last resort. As a result, changes to
- * the class definition need to be implemented carefully so that older
- * serializations remain d{@link Processor#readInfo() readable}. Otherwise,
- * users would have to purge their cache whenever the class design
- * changes.)</p>
+ * cached}, perhaps for a very long time. When an instance is needed, it may be
+ * preferentially acquired from a cache, with a processor being consulted only
+ * as a last resort. As a result, changes to the class definition need to be
+ * implemented carefully so that {@link InfoDeserializer older serializations
+ * remain readable}. (Otherwise, users might have to purge their cache whenever
+ * the class design changes.)</p>
  *
- * @see <a href="https://github.com/FasterXML/jackson-databind">jackson-databind
- *      docs</a>
+ * <h1>History</h1>
+ *
+ * <p>See {@link Serialization}.</p>
  */
-@JsonPropertyOrder({ "identifier", "mediaType", "numResolutions", "images" })
-@JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonIgnoreProperties(ignoreUnknown = true)
+@JsonSerialize(using = InfoSerializer.class)
+@JsonDeserialize(using = InfoDeserializer.class)
 public final class Info {
 
     public static final class Builder {
 
-        private Info info;
+        private final Info info;
 
         Builder(Info info) {
             this.info = info;
@@ -74,13 +77,13 @@ public final class Info {
             return this;
         }
 
-        public Builder withNumResolutions(int numResolutions) {
-            info.setNumResolutions(numResolutions);
+        public Builder withMetadata(Metadata metadata) {
+            info.setMetadata(metadata);
             return this;
         }
 
-        public Builder withOrientation(Orientation orientation) {
-            info.getImages().get(0).setOrientation(orientation);
+        public Builder withNumResolutions(int numResolutions) {
+            info.setNumResolutions(numResolutions);
             return this;
         }
 
@@ -108,23 +111,13 @@ public final class Info {
      * Represents an embedded subimage within a container stream. This is a
      * physical image such as an embedded EXIF thumbnail or embedded TIFF page.
      */
-    @JsonPropertyOrder({ "width", "height", "tileWidth", "tileHeight",
-            "orientation" })
+    @JsonPropertyOrder({ "width", "height", "tileWidth", "tileHeight" })
+    @JsonIgnoreProperties({"orientation"}) // this is from schema version <4
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static final class Image {
 
-        public int width = 0;
-        public int height = 0;
-        public String orientation;
-        public Integer tileWidth;
-        public Integer tileHeight;
-
-        /**
-         * No-op constructor.
-         */
-        public Image() {
-            setOrientation(Orientation.ROTATE_0);
-        }
+        public int width, height;
+        public Integer tileWidth, tileHeight;
 
         @Override
         public boolean equals(Object obj) {
@@ -132,53 +125,16 @@ public final class Info {
                 return true;
             } else if (obj instanceof Image) {
                 final Image other = (Image) obj;
-                return (width == other.width && height == other.height &&
+                return (width == other.width &&
+                        height == other.height &&
                         Objects.equals(tileWidth, other.tileWidth) &&
-                        Objects.equals(tileHeight, other.tileHeight) &&
-                        Objects.equals(orientation, other.orientation));
+                        Objects.equals(tileHeight, other.tileHeight));
             }
             return super.equals(obj);
         }
 
         /**
-         * @return The instance's orientation, or {@link Orientation#ROTATE_0}
-         *         if none.
-         */
-        public Orientation getOrientation() {
-            if (orientation != null) {
-                return Orientation.valueOf(orientation);
-            }
-            return Orientation.ROTATE_0;
-        }
-
-        /**
-         * @return Image size with the orientation taken into account.
-         */
-        @JsonIgnore
-        public Dimension getOrientationSize() {
-            Dimension size = getSize();
-            if (getOrientation().equals(Orientation.ROTATE_90) ||
-                    getOrientation().equals(Orientation.ROTATE_270)) {
-                size.invert();
-            }
-            return size;
-        }
-
-        /**
-         * @return Tile size with the orientation taken into account.
-         */
-        @JsonIgnore
-        public Dimension getOrientationTileSize() {
-            Dimension tileSize = getTileSize();
-            if (getOrientation().equals(Orientation.ROTATE_90) ||
-                    getOrientation().equals(Orientation.ROTATE_270)) {
-                tileSize.invert();
-            }
-            return tileSize;
-        }
-
-        /**
-         * @return Physical image size, disregarding orientation.
+         * @return Physical image size.
          */
         @JsonIgnore
         public Dimension getSize() {
@@ -186,7 +142,7 @@ public final class Info {
         }
 
         /**
-         * @return Physical tile size, disregarding orientation.
+         * @return Physical tile size.
          */
         @JsonIgnore
         public Dimension getTileSize() {
@@ -198,16 +154,12 @@ public final class Info {
 
         @Override
         public int hashCode() {
-            return String.format("%d%d%s%d%d", width, height,
-                    orientation, tileWidth, tileHeight).hashCode();
-        }
-
-        public void setOrientation(Orientation orientation) {
-            this.orientation = orientation.toString();
+            int[] codes = new int[] { width, height, tileWidth, tileHeight };
+            return Arrays.hashCode(codes);
         }
 
         /**
-         * @param size Physical image size, disregarding orientation.
+         * @param size Physical image size.
          */
         public void setSize(Dimension size) {
             width = size.intWidth();
@@ -215,7 +167,7 @@ public final class Info {
         }
 
         /**
-         * @param tileSize Physical image tile size, disregarding orientation.
+         * @param tileSize Physical image tile size.
          */
         public void setTileSize(Dimension tileSize) {
             tileWidth = tileSize.intWidth();
@@ -224,36 +176,92 @@ public final class Info {
 
     }
 
+    public enum Serialization {
+
+        /**
+         * Represents a number of older serializations from application
+         * versions prior to 3.4 that are no longer supported.
+         */
+        VERSION_1(1),
+
+        /**
+         * <p>Added the {@code mediaType} key.</p>
+         *
+         * <p>Introduced in application version 3.4.</p>
+         */
+        VERSION_2(2),
+
+        /**
+         * <p>Added {@code numResolutions} and {@code identifier} keys.</p>
+         *
+         * <p>Introduced in application version 4.0.</p>
+         */
+        VERSION_3(3),
+
+        /**
+         * <p>Replaced the {@code orientation} key with the {@code metadata}
+         * key, and added {@code applicationVersion} and {@code
+         * serializationVersion} keys.</p>
+         *
+         * <p>Introduced in application version 5.0.</p>
+         */
+        VERSION_4(4);
+
+        private final int version;
+
+        static final Serialization CURRENT = VERSION_4;
+
+        Serialization(int version) {
+            this.version = version;
+        }
+
+        int getVersion() {
+            return version;
+        }
+    }
+
+    private String appVersion           = Application.getVersion();
     private Identifier identifier;
+    private MediaType mediaType;
+    private Metadata metadata           = new Metadata();
+    private Serialization serialization = Serialization.CURRENT;
 
     /**
-     * Ordered list of subimages. The main image is at index {@literal 0}.
+     * Ordered list of subimages. The main image is at index {@code 0}.
      */
-    private final List<Image> images = new ArrayList<>();
-
-    private MediaType mediaType;
+    private final List<Image> images = new ArrayList<>(8);
 
     /**
      * Number of resolutions available in the image. This applies to images
-     * that may not have literal embedded subimages, but can be decoded at
-     * reduced scale multiples.
+     * that may not have {@link #images literal embedded subimages}, but can
+     * still be decoded at reduced scale factors.
      */
     private int numResolutions = -1;
+
+    private transient boolean isPersistable = true;
 
     public static Builder builder() {
         return new Builder(new Info());
     }
 
     public static Info fromJSON(Path jsonFile) throws IOException {
-        return new ObjectMapper().readValue(jsonFile.toFile(), Info.class);
+        return newMapper().readValue(jsonFile.toFile(), Info.class);
     }
 
     public static Info fromJSON(InputStream jsonStream) throws IOException {
-        return new ObjectMapper().readValue(jsonStream, Info.class);
+        return newMapper().readValue(jsonStream, Info.class);
     }
 
     public static Info fromJSON(String json) throws IOException {
-        return new ObjectMapper().readValue(json, Info.class);
+        return newMapper().readValue(json, Info.class);
+    }
+
+    private static ObjectMapper newMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        // This module obscures Optionals from the serialization (e.g.
+        // Optional.empty() maps to null rather than { isPresent: false })
+        mapper.registerModule(new Jdk8Module());
+        return mapper;
     }
 
     public Info() {
@@ -266,8 +274,10 @@ public final class Info {
             return true;
         } else if (obj instanceof Info) {
             Info other = (Info) obj;
-            return Objects.equals(other.getIdentifier(), getIdentifier()) &&
-                    Objects.equals(other.getOrientation(), getOrientation()) &&
+            return Objects.equals(other.getApplicationVersion(), getApplicationVersion()) &&
+                    Objects.equals(other.getSerialization(), getSerialization()) &&
+                    Objects.equals(other.getIdentifier(), getIdentifier()) &&
+                    Objects.equals(other.getMetadata(), getMetadata()) &&
                     Objects.equals(other.getSourceFormat(), getSourceFormat()) &&
                     other.getNumResolutions() == getNumResolutions() &&
                     other.getImages().equals(getImages());
@@ -276,11 +286,20 @@ public final class Info {
     }
 
     /**
-     * @return Identifier. Will be {@literal null} if the instance was
-     *         serialized in an application version prior to 4.0.
+     * @return Version of the application with which the instance was or will
+     *         be serialized.
+     * @since 5.0
+     * @see #getSerialization
+     */
+    public String getApplicationVersion() {
+        return appVersion;
+    }
+
+    /**
+     * @return Identifier. Will be {@code null} if the instance was serialized
+     *         in an application version prior to 4.0.
      * @since 4.0
      */
-    @JsonGetter
     public Identifier getIdentifier() {
         return identifier;
     }
@@ -295,76 +314,69 @@ public final class Info {
      * @see #getSourceFormat()
      * @since 3.4
      */
-    @JsonGetter
-    @SuppressWarnings("unused")
     public MediaType getMediaType() {
         return mediaType;
+    }
+
+    /**
+     * @since 5.0
+     */
+    public Metadata getMetadata() {
+        return metadata;
+    }
+
+    /**
+     * Returns the number of "pages" contained in the image. If the {@link
+     * #getImages() images} appear to comprise a pyramid, this is {@code 1}.
+     * Otherwise, it is equal to their count.
+     *
+     * @return Page count.
+     * @since 5.0
+     */
+    public int getNumPages() {
+        return isPyramid() ? 1 : getImages().size();
     }
 
     /**
      * <p>Returns the number of resolutions contained in the image.</p>
      *
      * <ul>
-     *     <li>For formats like multi-resolution {@link Format#TIF}, this will
-     *     match the size of {@link #getImages()}.</li>
-     *     <li>For formats like {@link Format#JP2}, it will be {@literal
-     *     number of decomposition levels + 1}.</li>
-     *     <li>For more conventional formats like {@link Format#JPG},
-     *     {@link Format#PNG}, {@link Format#BMP}, etc., it will be
-     *     {@literal 1}.</li>
+     *     <li>For formats like multi-resolution TIFF, this will match the size
+     *     of {@link #getImages()}.</li>
+     *     <li>For formats like JPEG2000, it will be {@code (number of
+     *     decomposition levels) + 1}.</li>
+     *     <li>For more conventional formats like JPEG, PNG, BMP, etc., it will
+     *     be {@code 1}.</li>
      *     <li>For instances deserialized from a version older than 4.0, it
-     *     will be {@literal -1}.</li>
+     *     will be {@code -1}.</li>
      * </ul>
      *
-     * @return Number of resolutions contained in the image, or {@literal -1}
-     *         if the instance was serialized in an application version prior
-     *         to 4.0.
+     * @return Number of resolutions contained in the image, or {@code -1} if
+     *         the instance was serialized in an older application version.
      * @since 4.0
      */
-    @JsonGetter
     public int getNumResolutions() {
         return numResolutions;
     }
 
     /**
-     * @return Orientation of the main image.
+     * @since 5.0
+     * @see #getApplicationVersion
      */
-    @JsonIgnore
-    public Orientation getOrientation() {
-        return images.get(0).getOrientation();
-    }
-
-    /**
-     * @return Size of the main image, respecting its orientation.
-     */
-    @JsonIgnore
-    public Dimension getOrientationSize() {
-        return getOrientationSize(0);
-    }
-
-    /**
-     * @param imageIndex
-     * @return Size of the image at the given index, respecting its
-     *         orientation.
-     */
-    @JsonIgnore
-    public Dimension getOrientationSize(int imageIndex) {
-        return images.get(imageIndex).getOrientationSize();
+    public Serialization getSerialization() {
+        return serialization;
     }
 
     /**
      * @return Size of the main image.
      */
-    @JsonIgnore
     public Dimension getSize() {
         return getSize(0);
     }
 
     /**
-     * @param imageIndex
      * @return Size of the image at the given index.
      */
-    @JsonIgnore
     public Dimension getSize(int imageIndex) {
         return images.get(imageIndex).getSize();
     }
@@ -373,7 +385,6 @@ public final class Info {
      * @return Source format of the image, or {@link Format#UNKNOWN} if
      *         unknown.
      */
-    @JsonIgnore
     public Format getSourceFormat() {
         if (mediaType != null) {
             return mediaType.toFormat();
@@ -383,16 +394,55 @@ public final class Info {
 
     @Override
     public int hashCode() {
-        return String.format("%d%d",
-                getImages().hashCode(),
-                getSourceFormat().hashCode()).hashCode();
+        int[] codes = new int[7];
+        codes[0] = getApplicationVersion().hashCode();
+        codes[1] = getSerialization().hashCode();
+        codes[2] = getIdentifier().hashCode();
+        codes[3] = getImages().hashCode();
+        codes[4] = getSourceFormat().hashCode();
+        codes[5] = getNumResolutions();
+        if (getMetadata() != null) {
+            codes[6] = getMetadata().hashCode();
+        }
+        return Arrays.hashCode(codes);
+    }
+
+    /**
+     * @return Whether the instance contains complete and full information
+     *         about the source image.
+     * @since  5.0
+     */
+    public boolean isPersistable() {
+        return isPersistable;
+    }
+
+    /**
+     * @return Whether the {@link #getImages() images} appear to comprise a
+     *         pyramid.
+     * @since  5.0
+     */
+    boolean isPyramid() {
+        List<Dimension> sizes = getImages()
+                .stream()
+                .map(Image::getSize)
+                .collect(Collectors.toUnmodifiableList());
+        return Dimension.isPyramid(sizes);
+    }
+
+    /**
+     * @param version Application version string. This value is not serialized
+     *                (the {@link Application#getVersion() current application
+     *                version} is instead).
+     * @since         5.0
+     */
+    void setApplicationVersion(String version) {
+        this.appVersion = version;
     }
 
     /**
      * @param identifier Identifier of the image described by the instance.
-     * @since 4.0
+     * @since            4.0
      */
-    @JsonSetter
     public void setIdentifier(Identifier identifier) {
         this.identifier = identifier;
     }
@@ -403,22 +453,51 @@ public final class Info {
      * @see #setSourceFormat(Format)
      * @since 3.4
      */
-    @JsonSetter
-    @SuppressWarnings("unused")
     public void setMediaType(MediaType mediaType) {
         this.mediaType = mediaType;
+    }
+
+    /**
+     * @since 5.0
+     */
+    public void setMetadata(Metadata metadata) {
+        this.metadata = metadata;
     }
 
     /**
      * @param numResolutions Number of resolutions contained in the image.
      * @since 4.0
      */
-    @JsonSetter
     public void setNumResolutions(int numResolutions) {
         this.numResolutions = numResolutions;
     }
 
-    @JsonIgnore
+    /**
+     * If a {@link Processor} cannot fully {@link Processor#readInfo()
+     * populate} an instance&mdash;for example, if it can't read XMP metadata
+     * in order to set a complete {@link #metadata}&mdash;then it should invoke
+     * this method with a {@code false} argument to make that clear.
+     *
+     * @since 5.0
+     */
+    public void setPersistable(boolean isComplete) {
+        this.isPersistable = isComplete;
+    }
+
+    /**
+     * @param version One of the {@link Serialization} versions. This value is
+     *                not serialized (the current serialization version is
+     *                instead).
+     * @since 5.0
+     */
+    void setSerializationVersion(int version) {
+        this.serialization = Arrays
+                .stream(Serialization.values())
+                .filter(sv -> sv.getVersion() == version)
+                .findFirst()
+                .orElseThrow(IllegalArgumentException::new);
+    }
+
     public void setSourceFormat(Format sourceFormat) {
         if (sourceFormat == null) {
             mediaType = null;
@@ -430,9 +509,8 @@ public final class Info {
     /**
      * @return JSON representation of the instance.
      */
-    @JsonIgnore
     public String toJSON() throws JsonProcessingException {
-        return new ObjectMapper().writer().writeValueAsString(this);
+        return newMapper().writer().writeValueAsString(this);
     }
 
     @Override
@@ -447,9 +525,8 @@ public final class Info {
     /**
      * @param os Output stream to write to.
      */
-    @JsonIgnore
     public void writeAsJSON(OutputStream os) throws IOException {
-        new ObjectMapper().writer().writeValue(os, this);
+        newMapper().writer().writeValue(os, this);
     }
 
 }

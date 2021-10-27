@@ -4,7 +4,10 @@ import edu.illinois.library.cantaloupe.operation.ColorTransform;
 
 public enum Quality {
 
-    BITONAL("bitonal"), COLOR("color"), DEFAULT("default"), GRAY("gray");
+    BITONAL("bitonal"),
+    COLOR("color"),
+    DEFAULT("default"),
+    GRAY("gray");
 
     private String uriValue;
 

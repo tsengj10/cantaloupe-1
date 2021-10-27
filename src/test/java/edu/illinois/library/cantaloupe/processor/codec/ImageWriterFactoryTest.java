@@ -2,40 +2,41 @@ package edu.illinois.library.cantaloupe.processor.codec;
 
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.operation.Encode;
+import edu.illinois.library.cantaloupe.processor.OutputFormatException;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import java.util.EnumSet;
 import java.util.Set;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ImageWriterFactoryTest extends BaseTest {
 
     private ImageWriterFactory instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         instance = new ImageWriterFactory();
     }
 
     @Test
-    public void testSupportedFormats() {
-        Set<Format> outputFormats = EnumSet.of(
-                Format.GIF, Format.JPG, Format.PNG, Format.TIF);
+    void testSupportedFormats() {
+        Set<Format> outputFormats = Set.of(
+                Format.get("gif"), Format.get("jpg"), Format.get("png"), Format.get("tif"));
         assertEquals(outputFormats, ImageWriterFactory.supportedFormats());
     }
 
     @Test
-    public void testNewImageWriter() {
-        assertNotNull(instance.newImageWriter(new Encode(Format.JPG)));
+    void testNewImageWriter() throws Exception {
+        assertNotNull(instance.newImageWriter(new Encode(Format.get("jpg"))));
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testNewImageWriterWithUnsupportedFormat() {
-        instance.newImageWriter(new Encode(Format.UNKNOWN));
+    @Test
+    void testNewImageWriterWithUnsupportedFormat() {
+        assertThrows(OutputFormatException.class,
+                () -> instance.newImageWriter(new Encode(Format.UNKNOWN)));
     }
 
 }

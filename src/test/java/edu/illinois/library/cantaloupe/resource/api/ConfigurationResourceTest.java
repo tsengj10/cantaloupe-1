@@ -11,14 +11,13 @@ import edu.illinois.library.cantaloupe.http.Response;
 import edu.illinois.library.cantaloupe.image.MediaType;
 import edu.illinois.library.cantaloupe.resource.Route;
 import org.apache.commons.lang3.StringUtils;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Functional test of ConfigurationResource.
@@ -31,7 +30,7 @@ public class ConfigurationResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testGETWithEndpointEnabled() throws Exception {
+    void testGETWithEndpointEnabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.API_ENABLED, true);
 
@@ -41,7 +40,7 @@ public class ConfigurationResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testGETWithEndpointDisabled() throws Exception {
+    void testGETWithEndpointDisabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.API_ENABLED, false);
 
@@ -54,14 +53,14 @@ public class ConfigurationResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testGETResponseBody() throws Exception {
+    void testGETResponseBody() throws Exception {
         client.setMethod(Method.GET);
         Response response = client.send();
         assertTrue(response.getBodyAsString().startsWith("{"));
     }
 
     @Test
-    public void testGETResponseHeaders() throws Exception {
+    void testGETResponseHeaders() throws Exception {
         client.setMethod(Method.GET);
         Response response = client.send();
         Headers headers = response.getHeaders();
@@ -70,8 +69,8 @@ public class ConfigurationResourceTest extends AbstractAPIResourceTest {
         // Cache-Control
         assertEquals("no-cache", headers.getFirstValue("Cache-Control"));
         // Content-Type
-        assertEquals("application/json;charset=UTF-8",
-                headers.getFirstValue("Content-Type"));
+        assertTrue("application/json;charset=UTF-8".equalsIgnoreCase(
+                headers.getFirstValue("Content-Type")));
         // Content-Length
         assertNotNull(headers.getFirstValue("Content-Length"));
         // Date
@@ -94,7 +93,7 @@ public class ConfigurationResourceTest extends AbstractAPIResourceTest {
 
         Headers headers = response.getHeaders();
         List<String> methods =
-                Arrays.asList(StringUtils.split(headers.getFirstValue("Allow"), ", "));
+                List.of(StringUtils.split(headers.getFirstValue("Allow"), ", "));
         assertEquals(3, methods.size());
         assertTrue(methods.contains("GET"));
         assertTrue(methods.contains("PUT"));
@@ -115,7 +114,7 @@ public class ConfigurationResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testPUT() throws Exception {
+    void testPUT() throws Exception {
         Map<String,Object> entityMap = new HashMap<>();
         entityMap.put("test", "cats");
         String entity = new ObjectMapper().writer().writeValueAsString(entityMap);

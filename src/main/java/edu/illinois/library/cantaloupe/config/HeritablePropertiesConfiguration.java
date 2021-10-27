@@ -1,13 +1,12 @@
 package edu.illinois.library.cantaloupe.config;
 
 import edu.illinois.library.cantaloupe.util.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
@@ -31,6 +30,9 @@ import java.util.concurrent.locks.StampedLock;
  * performance.</p>
  */
 class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
+
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(HeritablePropertiesConfiguration.class);
 
     private static final String EXTENDS_KEY = "extends";
 
@@ -128,8 +130,7 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
         return bool;
     }
 
-    @Nullable
-    private Boolean readBoolean(@Nonnull String key) {
+    private Boolean readBoolean(String key) {
         Boolean bool = null;
         for (PropertiesDocument doc : propertiesDocs.values()) {
             if (doc.containsKey(key)) {
@@ -357,8 +358,7 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
     }
 
     @Override
-    @Nullable
-    public Object getProperty(@Nonnull String key) {
+    public Object getProperty(String key) {
         return readPropertyOptimistically(key);
     }
 
@@ -378,8 +378,7 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
         return prop;
     }
 
-    @Nullable
-    private Object readProperty(@Nonnull String key) {
+    private Object readProperty(String key) {
         Object prop = null;
         for (PropertiesDocument doc : propertiesDocs.values()) {
             if (doc.containsKey(key)) {
@@ -391,8 +390,7 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
     }
 
     @Override
-    @Nullable
-    public String getString(@Nonnull String key) {
+    public String getString(String key) {
         return readStringOptimistically(key);
     }
 
@@ -430,17 +428,16 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
     }
 
     @Override
-    public void reload() throws ConfigurationException {
-        final long stamp = lock.writeLock();
-        try {
-            final Path mainConfigFile = getFile();
-            if (mainConfigFile != null) {
+    public void reload() {
+        getFile().ifPresent(mainConfigFile -> {
+            final long stamp = lock.writeLock();
+            try {
                 // Calculate the checksum of the file contents and compare it
                 // to what has already been loaded. If the sums match, skip the
                 // reload.
-                byte[] fileBytes       = Files.readAllBytes(mainConfigFile);
+                byte[] fileBytes = Files.readAllBytes(mainConfigFile);
                 final MessageDigest md = MessageDigest.getInstance("MD5");
-                byte[] digestBytes     = md.digest(fileBytes);
+                byte[] digestBytes = md.digest(fileBytes);
                 if (Arrays.equals(digestBytes, mainContentsChecksum)) {
                     return;
                 }
@@ -448,14 +445,12 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
 
                 propertiesDocs.clear();
                 loadFileAndAncestors(mainConfigFile);
+            } catch (IOException | NoSuchAlgorithmException e) {
+                LOGGER.error("reload(): {}", e.getMessage(), e);
+            } finally {
+                lock.unlock(stamp);
             }
-        } catch (NoSuchFileException e) {
-            System.err.println("File not found: " + e.getMessage());
-        } catch (IOException | NoSuchAlgorithmException e) {
-            System.err.println(e.getMessage());
-        } finally {
-            lock.unlock(stamp);
-        }
+        });
     }
 
     /**
@@ -507,10 +502,7 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
         }
     }
 
-    /**
-     * N.B.: Not thread-safe!
-     */
-    private void loadFileAndAncestors(Path file) throws ConfigurationException {
+    private synchronized void loadFileAndAncestors(Path file) {
         System.out.println("Loading config file: " + file);
 
         PropertiesDocument doc = new PropertiesDocument();
@@ -530,10 +522,10 @@ class HeritablePropertiesConfiguration implements MultipleFileConfiguration {
                             File.separator + new File(parent).getName();
                 }
                 Path parentFile = Paths.get(parent).toAbsolutePath();
-                if (!propertiesDocs.keySet().contains(parentFile)) {
+                if (!propertiesDocs.containsKey(parentFile)) {
                     loadFileAndAncestors(parentFile);
                 } else {
-                    throw new ConfigurationException("Inheritance loop");
+                    LOGGER.error("Inheritance loop in {}", parent);
                 }
             }
         } catch (IOException e) {

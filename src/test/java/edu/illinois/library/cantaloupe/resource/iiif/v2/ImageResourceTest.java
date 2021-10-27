@@ -3,34 +3,35 @@ package edu.illinois.library.cantaloupe.resource.iiif.v2;
 import edu.illinois.library.cantaloupe.Application;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.http.Headers;
 import edu.illinois.library.cantaloupe.http.Method;
 import edu.illinois.library.cantaloupe.http.ResourceException;
 import edu.illinois.library.cantaloupe.http.Response;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.image.ScaleConstraint;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
+import edu.illinois.library.cantaloupe.image.StandardMetaIdentifierTransformer;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.resource.ResourceTest;
 import edu.illinois.library.cantaloupe.resource.Route;
 import edu.illinois.library.cantaloupe.resource.iiif.ImageResourceTester;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import edu.illinois.library.cantaloupe.util.SystemUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.junit.Test;
+import org.apache.commons.lang3.SystemUtils;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.util.Arrays;
 import java.util.List;
 
 import static edu.illinois.library.cantaloupe.test.Assert.HTTPAssert.*;
-import static org.junit.Assert.*;
-import static org.junit.Assume.assumeTrue;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.*;
 
 public class ImageResourceTest extends ResourceTest {
 
     private static final String IMAGE = "jpg-rgb-64x56x8-baseline.jpg";
 
-    private ImageResourceTester tester = new ImageResourceTester();
+    private final ImageResourceTester tester = new ImageResourceTester();
 
     @Override
     protected String getEndpointPath() {
@@ -38,70 +39,116 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETAuthorizationWhenAuthorized() {
+    void testGETAuthorizationWhenAuthorized() {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testAuthorizationWhenAuthorized(uri);
     }
 
     @Test
-    public void testGETAuthorizationWhenNotAuthorized() {
+    void testGETAuthorizationWhenNotAuthorized() {
         URI uri = getHTTPURI("/forbidden.jpg/full/full/0/color.jpg");
         tester.testAuthorizationWhenNotAuthorized(uri);
     }
 
     @Test
-    public void testGETAuthorizationWhenRedirecting() throws Exception {
+    void testGETAuthorizationWhenNotAuthorizedWhenAccessingCachedResource()
+            throws Exception {
+        URI uri = getHTTPURI("/forbidden.jpg/full/full/0/color.jpg");
+        tester.testAuthorizationWhenNotAuthorizedWhenAccessingCachedResource(uri);
+    }
+
+    @Test
+    void testGETAuthorizationWhenRedirecting() throws Exception {
         URI uri = getHTTPURI("/redirect.jpg/full/full/0/color.jpg");
         tester.testAuthorizationWhenRedirecting(uri);
     }
 
     @Test
-    public void testGETAuthorizationWhenScaleConstraining() throws Exception {
+    void testGETAuthorizationWhenScaleConstraining() throws Exception {
         URI uri = getHTTPURI("/reduce.jpg/full/full/0/color.jpg");
         tester.testAuthorizationWhenScaleConstraining(uri);
     }
 
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable()
+    void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable(uri);
     }
 
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsNotCacheable()
+    void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsNotCacheable()
             throws Exception {
         URI uri = getHTTPURI("/bogus/full/full/0/color.jpg");
         tester.testCacheHeadersWhenClientCachingIsEnabledAndResponseIsNotCacheable(uri);
     }
 
     /**
-     * Tests that there is no Cache-Control header returned when
-     * cache.client.enabled = true but a cache=false argument is present
-     * in the URL query.
+     * Tests that there is no {@code Cache-Control} header returned when
+     * {@code cache.client.enabled = true} but a {@code cache=nocache} argument
+     * is present in the URL query.
      */
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL()
+    void testGETCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL1()
+            throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?cache=nocache");
+        tester.testCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL(uri);
+    }
+
+    /**
+     * Tests that there is no {@code Cache-Control} header returned when
+     * {@code cache.client.enabled = true} but a {@code cache=false} argument
+     * is present in the URL query.
+     */
+    @Test
+    void testGETCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL2()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?cache=false");
         tester.testCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL(uri);
     }
 
+    /**
+     * Tests that there is a {@code Cache-Control} header returned when
+     * {@code cache.client.enabled = true} and a {@code cache=recache} argument
+     * is present in the URL query.
+     */
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsDisabled() throws Exception {
+    void testGETCacheHeadersWhenClientCachingIsEnabledAndRecachingIsEnabledInURL()
+            throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?cache=recache");
+        tester.testCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable(uri);
+    }
+
+    @Test
+    void testGETCacheHeadersWhenClientCachingIsDisabled() throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testCacheHeadersWhenClientCachingIsDisabled(uri);
     }
 
     @Test
-    public void testGETCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied()
+    void testGETCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied1()
+            throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.png?cache=nocache");
+        tester.testCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied(uri);
+    }
+
+    @Test
+    void testGETCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied2()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.png?cache=false");
         tester.testCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied(uri);
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstEnabled()
+    void testGETCachingWhenCachesAreEnabledAndRecacheQueryArgumentIsSupplied()
+            throws Exception {
+        assumeFalse(SystemUtils.IS_OS_WINDOWS); // TODO: this fails in Windows
+        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.png?cache=recache");
+        tester.testCachingWhenCachesAreEnabledAndRecacheQueryArgumentIsSupplied(uri);
+    }
+
+    @Test
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -110,7 +157,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -119,7 +166,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstEnabled()
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -128,7 +175,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -137,7 +184,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstEnabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -146,7 +193,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -155,7 +202,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstEnabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -164,7 +211,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/1/color.jpg");
@@ -173,64 +220,45 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETContentDispositionHeaderWithNoHeaderInConfiguration() throws Exception {
+    void testGETContentDispositionHeaderWithNoHeader() throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
-        tester.testContentDispositionHeaderWithNoHeaderInConfiguration(uri);
+        tester.testContentDispositionHeaderWithNoHeader(uri);
     }
 
     @Test
-    public void testGETContentDispositionHeaderSetToInlineInConfiguration() throws Exception {
-        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
-        tester.testContentDispositionHeaderSetToInlineInConfiguration(uri);
-    }
-
-    @Test
-    public void testGETContentDispositionHeaderSetToAttachmentInConfiguration()
-            throws Exception {
-        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
-        tester.testContentDispositionHeaderSetToAttachmentInConfiguration(uri);
-    }
-
-    @Test
-    public void testGETContentDispositionHeaderWithNoHeaderInQuery() throws Exception {
-        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
-        tester.testContentDispositionHeaderWithNoHeaderInQuery(uri);
-    }
-
-    @Test
-    public void testGETContentDispositionHeaderSetToInlineInQuery() throws Exception {
+    void testGETContentDispositionHeaderSetToInline() throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?response-content-disposition=inline");
-        tester.testContentDispositionHeaderSetToInlineInQuery(uri);
+        tester.testContentDispositionHeaderSetToInline(uri);
     }
 
     @Test
-    public void testGETContentDispositionHeaderSetToAttachmentInQuery()
-            throws Exception {
+    void testGETContentDispositionHeaderSetToAttachment() throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?response-content-disposition=attachment");
-        tester.testContentDispositionHeaderSetToAttachmentInQuery(uri);
+        tester.testContentDispositionHeaderSetToAttachment(uri);
     }
 
     @Test
-    public void testGETContentDispositionHeaderSetToAttachmentWithFilenameInQuery()
+    void testGETContentDispositionHeaderSetToAttachmentWithFilename()
             throws Exception {
         final String filename = "cats%20dogs.jpg";
         final String expected = "cats dogs.jpg";
 
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?response-content-disposition=attachment;filename%3D%22" + filename + "%22");
-        tester.testContentDispositionHeaderSetToAttachmentWithFilenameInQuery(uri, expected);
+
+        tester.testContentDispositionHeaderSetToAttachmentWithFilename(uri, expected);
 
         uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?response-content-disposition=attachment;%20filename%3D%22" + filename + "%22");
-        tester.testContentDispositionHeaderSetToAttachmentWithFilenameInQuery(uri, expected);
+        tester.testContentDispositionHeaderSetToAttachmentWithFilename(uri, expected);
 
         uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?response-content-disposition=attachment;filename%3D" + filename);
-        tester.testContentDispositionHeaderSetToAttachmentWithFilenameInQuery(uri, expected);
+        tester.testContentDispositionHeaderSetToAttachmentWithFilename(uri, expected);
 
         uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg?response-content-disposition=attachment;%20filename%3D" + filename);
-        tester.testContentDispositionHeaderSetToAttachmentWithFilenameInQuery(uri, expected);
+        tester.testContentDispositionHeaderSetToAttachmentWithFilename(uri, expected);
     }
 
     @Test
-    public void testGETEndpointEnabled() {
+    void testGETEndpointEnabled() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_1_ENDPOINT_ENABLED, true);
 
@@ -238,7 +266,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETEndpointDisabled() {
+    void testGETEndpointDisabled() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, false);
 
@@ -246,38 +274,43 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETWithForwardSlashInIdentifier() {
-        URI uri = getHTTPURI("/subfolder%2Fjpg/full/max/0/color.jpg");
+    void testGETWithForwardSlashInIdentifier() {
+        URI uri = getHTTPURI("/subfolder%2Fjpg/full/max/0/default.jpg");
         tester.testForwardSlashInIdentifier(uri);
     }
 
     @Test
-    public void testGETWithBackslashInIdentifier() {
-        URI uri = getHTTPURI("/subfolder%5Cjpg/full/max/0/color.jpg");
+    void testGETWithBackslashInIdentifier() {
+        URI uri = getHTTPURI("/subfolder%5Cjpg/full/max/0/default.jpg");
         tester.testBackslashInIdentifier(uri);
     }
 
     @Test
-    public void testGETHTTP2() throws Exception {
+    void testGETWithIllegalCharactersInIdentifier() {
+        String uri = getHTTPURIString("/[bogus]/full/full/0/default.jpg");
+        tester.testIllegalCharactersInIdentifier(uri);
+    }
+
+    @Test
+    void testGETHTTP2() throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testHTTP2(uri);
     }
 
     @Test
-    public void testGETHTTPS1_1() throws Exception {
+    void testGETHTTPS1_1() throws Exception {
         URI uri = getHTTPSURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testHTTPS1_1(uri);
     }
 
     @Test
-    public void testGETHTTPS2() throws Exception {
-        assumeTrue(SystemUtils.isALPNAvailable());
+    void testGETHTTPS2() throws Exception {
         URI uri = getHTTPSURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testHTTPS2(uri);
     }
 
     @Test
-    public void testGETLinkHeader() throws Exception {
+    void testGETLinkHeader() throws Exception {
         client = newClient("/" + IMAGE + "/full/full/0/color.jpg");
         Response response = client.send();
 
@@ -286,7 +319,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETLinkHeaderWithSlashSubstitution() throws Exception {
+    void testGETLinkHeaderWithSlashSubstitution() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.SLASH_SUBSTITUTE, "CATS");
 
@@ -298,19 +331,19 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETLinkHeaderWithEncodedCharacters() throws Exception {
+    void testGETLinkHeaderWithEncodedCharacters() throws Exception {
         Configuration config = Configuration.getInstance();
-        config.setProperty(Key.SLASH_SUBSTITUTE, ":");
+        config.setProperty(Key.SLASH_SUBSTITUTE, "`");
 
-        client = newClient("/subfolder%3Ajpg/full/full/0/color.jpg");
+        client = newClient("/subfolder%60jpg/full/full/0/color.jpg");
         Response response = client.send();
 
         String value = response.getHeaders().getFirstValue("Link");
-        assertTrue(value.contains("subfolder%3Ajpg"));
+        assertTrue(value.contains("subfolder%60jpg"));
     }
 
     @Test
-    public void testGETLinkHeaderWithBaseURIOverride() throws Exception {
+    void testGETLinkHeaderWithBaseURIOverride() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.BASE_URI, "http://example.org/");
 
@@ -322,7 +355,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETLinkHeaderWithProxyHeaders() throws Exception {
+    void testGETLinkHeaderWithProxyHeaders() throws Exception {
         client = newClient("/" + IMAGE + "/pct:50,50,50,50/,35/0/color.jpg");
         client.getHeaders().set("X-Forwarded-Proto", "HTTP");
         client.getHeaders().set("X-Forwarded-Host", "example.org");
@@ -335,8 +368,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETLinkHeaderBaseURIOverridesProxyHeaders()
-            throws Exception {
+    void testGETLinkHeaderBaseURIOverridesProxyHeaders() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.BASE_URI, "https://example.net/");
 
@@ -352,143 +384,197 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETLessThanOrEqualToFullScale() {
+    void testGETLessThanOrEqualToFullScale() {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
         tester.testLessThanOrEqualToMaxScale(uri);
     }
 
     @Test
-    public void testGETGreaterThanFullScale() {
+    void testGETGreaterThanFullScale() {
         URI uri = getHTTPURI("/" + IMAGE + "/full/pct:101/0/color.png");
-        tester.testGreaterThanMaxScale(uri);
+        tester.testGreaterThanMaxScale(uri, 403);
     }
 
     @Test
-    public void testGETMinPixels() {
+    void testGETMinPixels() {
         URI uri = getHTTPURI("/" + IMAGE + "/0,0,0,0/full/0/color.png");
         tester.testMinPixels(uri);
     }
 
     @Test
-    public void testGETLessThanMaxPixels() {
+    void testGETLessThanMaxPixels() {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
         tester.testLessThanMaxPixels(uri);
     }
 
     @Test
-    public void testGETMoreThanMaxPixels() {
+    void testGETMoreThanMaxPixelsWithFullSizeArgument() {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
-        tester.testMoreThanMaxPixels(uri);
+        tester.testForbiddingMoreThanMaxPixels(uri);
     }
 
     @Test
-    public void testGETMaxPixelsIgnoredWhenStreamingSource() {
-        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
-        tester.testMaxPixelsIgnoredWhenStreamingSource(uri);
+    void testGETMoreThanMaxPixelsWithMaxSizeArgument() throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + "/full/max/0/color.png");
+        tester.testDownscalingToMaxPixels(uri, 64, 56, 1000);
     }
 
     @Test
-    public void testGETForbidden() {
+    void testGETForbidden() {
         URI uri = getHTTPURI("/forbidden/full/full/0/color.jpg");
         tester.testForbidden(uri);
     }
 
     @Test
-    public void testGETNotFound() {
+    void testGETNotFound() {
         URI uri = getHTTPURI("/invalid/full/full/0/color.jpg");
         tester.testNotFound(uri);
     }
 
     @Test
-    public void testGETProcessorValidationFailure() {
+    void testGETWithPageNumberInMetaIdentifier() {
+        final String image = "pdf-multipage.pdf";
+        URI uri1 = getHTTPURI("/" + image + "/full/max/0/color.jpg");
+        URI uri2 = getHTTPURI("/" + image + ";2/full/max/0/color.jpg");
+        assertRepresentationsNotSame(uri1, uri2);
+    }
+
+    @Test
+    void testGETWithPageNumberInQuery() {
+        final String image = "pdf-multipage.pdf";
+        URI uri1 = getHTTPURI("/" + image + "/full/max/0/color.jpg");
+        URI uri2 = getHTTPURI("/" + image + "/full/max/0/color.jpg?page=2");
+        assertRepresentationsNotSame(uri1, uri2);
+    }
+
+    @Test
+    void testGETProcessorValidationFailure() {
         URI uri = getHTTPURI("/pdf-multipage.pdf/full/full/0/color.jpg?page=999999");
         tester.testProcessorValidationFailure(uri);
     }
 
     @Test
-    public void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsFalse()
+    void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsFalse()
             throws Exception {
-        final String imagePath = "/" + IMAGE + "/full/full/0/color.jpg";
-        final URI uri = getHTTPURI(imagePath);
-        final OperationList opList = Parameters.fromUri(imagePath).toOperationList();
+        DelegateProxy delegateProxy = TestUtil.newDelegateProxy();
+        String imagePath            = "/" + IMAGE + "/full/full/0/color.jpg";
+        URI uri                     = getHTTPURI(imagePath);
+        OperationList opList        = Parameters.fromUri(imagePath)
+                .toOperationList(delegateProxy);
         tester.testPurgeFromCacheWhenSourceIsMissingAndOptionIsFalse(
                 uri, opList);
     }
 
     @Test
-    public void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsTrue()
+    void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsTrue()
             throws Exception {
-        final String imagePath = "/" + IMAGE + "/full/full/0/color.jpg";
-        final URI uri = getHTTPURI(imagePath);
-        final OperationList opList = Parameters.fromUri(imagePath).toOperationList();
+        DelegateProxy delegateProxy = TestUtil.newDelegateProxy();
+        String imagePath            = "/" + IMAGE + "/full/full/0/color.jpg";
+        URI uri                     = getHTTPURI(imagePath);
+        OperationList opList        = Parameters.fromUri(imagePath)
+                .toOperationList(delegateProxy);
         tester.testPurgeFromCacheWhenSourceIsMissingAndOptionIsTrue(
                 uri, opList);
     }
 
     @Test
-    public void testGETRecoveryFromDerivativeCacheNewDerivativeImageInputStreamException()
+    void testGETRecoveryFromDerivativeCacheNewDerivativeImageInputStreamException()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testRecoveryFromDerivativeCacheNewDerivativeImageInputStreamException(uri);
     }
 
     @Test
-    public void testGETRecoveryFromDerivativeCacheNewDerivativeImageOutputStreamException()
+    void testGETRecoveryFromDerivativeCacheNewDerivativeImageOutputStreamException()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
         tester.testRecoveryFromDerivativeCacheNewDerivativeImageOutputStreamException(uri);
     }
 
+    @Test
+    void testGETRecoveryFromIncorrectSourceFormat() throws Exception {
+        URI uri = getHTTPURI("/jpg-incorrect-extension.png/full/full/0/color.jpg");
+        tester.testRecoveryFromIncorrectSourceFormat(uri);
+    }
+
     /**
-     * Tests that a scale constraint of {@literal -1:1} is redirected to no
+     * Tests that a scale constraint of {@literal 1:1} is redirected to no
      * scale constraint.
      */
     @Test
-    public void testGETRedirectToNormalizedScaleConstraint1() {
-        URI fromURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(1, 1).toIdentifierSuffix() +
+    void testGETRedirectToNormalizedScaleConstraint1() {
+        MetaIdentifier metaIdentifier = MetaIdentifier.builder()
+                .withIdentifier(IMAGE)
+                .withScaleConstraint(1, 1)
+                .build();
+        String metaIdentifierString = new StandardMetaIdentifierTransformer()
+                .serialize(metaIdentifier, false);
+
+        URI fromURI = getHTTPURI("/" + metaIdentifierString +
                 "/full/full/0/color.png");
-        URI toURI = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
+        URI toURI   = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
         assertRedirect(fromURI, toURI, 301);
     }
 
     /**
-     * Tests that a scale constraint of {@literal -2:2} is redirected to no
+     * Tests that a scale constraint of {@literal 2:2} is redirected to no
      * scale constraint.
      */
     @Test
-    public void testGETRedirectToNormalizedScaleConstraint2() {
-        URI fromURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(2, 2).toIdentifierSuffix() +
+    void testGETRedirectToNormalizedScaleConstraint2() {
+        MetaIdentifier metaIdentifier = MetaIdentifier.builder()
+                .withIdentifier(IMAGE)
+                .withScaleConstraint(1, 1)
+                .build();
+        String metaIdentifierString = new StandardMetaIdentifierTransformer()
+                .serialize(metaIdentifier, false);
+
+        URI fromURI = getHTTPURI("/" + metaIdentifierString +
                 "/full/full/0/color.png");
-        URI toURI = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
+        URI toURI   = getHTTPURI("/" + IMAGE + "/full/full/0/color.png");
         assertRedirect(fromURI, toURI, 301);
     }
 
     /**
-     * Tests that a scale constraint of {@literal -2:4} is redirected to
-     * {@literal -1:2}.
+     * Tests that a scale constraint of {@literal 2:4} is redirected to
+     * {@literal 1:2}.
      */
     @Test
-    public void testGETRedirectToNormalizedScaleConstraint3() {
-        URI fromURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(2, 4).toIdentifierSuffix() +
+    void testGETRedirectToNormalizedScaleConstraint3() {
+        MetaIdentifier.Builder builder = MetaIdentifier.builder()
+                .withIdentifier(IMAGE);
+        // create the "from" URI
+        MetaIdentifier metaIdentifier = builder.withScaleConstraint(2, 4).build();
+        String metaIdentifierString =
+                new StandardMetaIdentifierTransformer().serialize(metaIdentifier);
+        URI fromURI = getHTTPURI("/" + IMAGE + metaIdentifierString +
                 "/full/full/0/color.png");
-        URI toURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(1, 2).toIdentifierSuffix() +
+
+        // create the "to" URI
+        metaIdentifier = builder.withScaleConstraint(1, 2).build();
+        metaIdentifierString =
+                new StandardMetaIdentifierTransformer().serialize(metaIdentifier);
+        URI toURI = getHTTPURI("/" + IMAGE + metaIdentifierString +
                 "/full/full/0/color.png");
+
         assertRedirect(fromURI, toURI, 301);
     }
 
     @Test
-    public void testGETResolverCheckAccessNotCalledWithSourceCacheHit()
+    void testGETScaleConstraintIsRespected() throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + ";1:2/full/max/0/color.jpg");
+        tester.testDimensions(uri, 32, 28);
+    }
+
+    @Test
+    void testGETSourceCheckAccessNotCalledWithSourceCacheHit()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testSourceCheckAccessNotCalledWithSourceCacheHit(new Identifier(IMAGE), uri);
     }
 
     @Test
-    public void testGETResolverGetSourceFormatNotCalledWithSourceCacheHit()
+    void testGETSourceGetSourceFormatNotCalledWithSourceCacheHit()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.jpg");
         tester.testSourceGetFormatNotCalledWithSourceCacheHit(new Identifier(IMAGE), uri);
@@ -499,44 +585,50 @@ public class ImageResourceTest extends ResourceTest {
      * used with a non-StreamProcessor.
      */
     @Test
-    public void testGETResolverProcessorCompatibility() {
+    void testGETSourceProcessorCompatibility() {
         URI uri = getHTTPURI("/jp2/full/full/0/color.jpg");
         tester.testSourceProcessorCompatibility(
                 uri, appServer.getHTTPHost(), appServer.getHTTPPort());
     }
 
     @Test
-    public void testGETNotRestrictedToSizes() {
+    void testGETNotRestrictedToSizes() {
         Configuration config = Configuration.getInstance();
-        config.setProperty(Key.IIIF_2_RESTRICT_TO_SIZES, false);
+        config.setProperty(Key.IIIF_RESTRICT_TO_SIZES, false);
 
         assertStatus(200, getHTTPURI("/" + IMAGE + "/full/53,37/0/color.jpg"));
     }
 
     @Test
-    public void testGETRestrictedToSizes() {
+    void testGETRestrictedToSizes() {
         Configuration config = Configuration.getInstance();
-        config.setProperty(Key.IIIF_2_RESTRICT_TO_SIZES, true);
+        config.setProperty(Key.IIIF_RESTRICT_TO_SIZES, true);
 
         assertStatus(403, getHTTPURI("/" + IMAGE + "/full/53,37/0/color.jpg"));
     }
 
     @Test
-    public void testGETSlashSubstitution() {
+    void testGETSlashSubstitution() {
         URI uri = getHTTPURI("/subfolderCATSjpg/full/full/0/color.jpg");
         tester.testSlashSubstitution(uri);
     }
 
     @Test
-    public void testGETUnavailableSourceFormat() {
+    void testGETUnavailableSourceFormat() {
         URI uri = getHTTPURI("/text.txt/full/full/0/color.jpg");
         tester.testUnavailableSourceFormat(uri);
     }
 
     @Test
-    public void testGETInvalidOutputFormat() {
+    void testGETInvalidOutputFormat() {
         URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.bogus");
         tester.testInvalidOutputFormat(uri);
+    }
+
+    @Test
+    void testGETUnsupportedOutputFormat() {
+        URI uri = getHTTPURI("/" + IMAGE + "/full/full/0/color.pdf");
+        tester.testUnsupportedOutputFormat(uri);
     }
 
     /**
@@ -544,7 +636,7 @@ public class ImageResourceTest extends ResourceTest {
      * more thoroughly elsewhere.
      */
     @Test
-    public void testGETResponseHeaders() throws Exception {
+    void testGETResponseHeaders() throws Exception {
         client = newClient("/" + IMAGE + "/full/full/0/color.jpg");
         Response response = client.send();
         Headers headers = response.getHeaders();
@@ -564,7 +656,7 @@ public class ImageResourceTest extends ResourceTest {
         assertNotNull(headers.getFirstValue("Server"));
         // Vary
         List<String> parts =
-                Arrays.asList(StringUtils.split(headers.getFirstValue("Vary"), ", "));
+                List.of(StringUtils.split(headers.getFirstValue("Vary"), ", "));
         assertEquals(5, parts.size());
         assertTrue(parts.contains("Accept"));
         assertTrue(parts.contains("Accept-Charset"));
@@ -577,7 +669,7 @@ public class ImageResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testOPTIONSWhenEnabled() throws Exception {
+    void testOPTIONSWhenEnabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, true);
 
@@ -587,14 +679,15 @@ public class ImageResourceTest extends ResourceTest {
         assertEquals(204, response.getStatus());
 
         Headers headers = response.getHeaders();
-        List<String> methods = Arrays.asList(StringUtils.split(headers.getFirstValue("Allow"), ", "));
+        List<String> methods =
+                List.of(StringUtils.split(headers.getFirstValue("Allow"), ", "));
         assertEquals(2, methods.size());
         assertTrue(methods.contains("GET"));
         assertTrue(methods.contains("OPTIONS"));
     }
 
     @Test
-    public void testOPTIONSWhenDisabled() throws Exception {
+    void testOPTIONSWhenDisabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, false);
         try {

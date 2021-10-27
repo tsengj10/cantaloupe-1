@@ -2,16 +2,14 @@ package edu.illinois.library.cantaloupe;
 
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.jar.Attributes;
-import java.util.jar.Manifest;
 
 /**
  * Class representing the application. This is not the main application class,
@@ -19,81 +17,42 @@ import java.util.jar.Manifest;
  */
 public final class Application {
 
-    // N.B.: Due to the way the application is packaged, this class does not
-    // have access to a logger.
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(Application.class);
 
     /**
-     * Reads information from the manifest.
-     */
-    private static class ManifestReader {
-
-        private static String name, version;
-
-        static {
-            readManifest();
-
-            if (name == null) {
-                name = "Cantaloupe";
-            }
-            if (version == null) {
-                version = "Unknown";
-            }
-        }
-
-        private static void readManifest() {
-            final Class<Application> clazz = Application.class;
-            final String className = clazz.getSimpleName() + ".class";
-            final URL classUrl = clazz.getResource(className);
-            final String classPath = classUrl.toString();
-
-            if (classPath.startsWith("file")) {
-                // The classpath will contain /WEB-INF only when running from a JAR.
-                final int webInfIndex = classPath.lastIndexOf("/WEB-INF");
-                if (webInfIndex > -1) {
-                    final String manifestPath =
-                            classPath.substring(0, webInfIndex) +
-                                    "/META-INF/MANIFEST.MF";
-                    try (InputStream urlStream = new URL(manifestPath).openStream()) {
-                        final Manifest manifest = new Manifest(urlStream);
-                        final Attributes attr = manifest.getMainAttributes();
-
-                        name = attr.getValue(Attributes.Name.IMPLEMENTATION_TITLE);
-                        version = attr.getValue(Attributes.Name.IMPLEMENTATION_VERSION);
-                    } catch (IOException e) {
-                        System.err.println(e.getMessage());
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Set to {@literal true} during testing.
+     * Set to {@code true} during testing.
      *
      * @see #isTesting()
      */
     public static final String TEST_VM_ARGUMENT = "cantaloupe.test";
 
+    private static final String DEFAULT_NAME    = "Cantaloupe";
+    private static final String DEFAULT_VERSION = "Unknown";
+
     /**
      * @return The application title from {@literal MANIFEST.MF}, or some other
-     *         string if not running from a JAR/WAR.
+     *         string if not running from a JAR.
      */
     public static String getName() {
-        return ManifestReader.name;
+        Package myPackage = Application.class.getPackage();
+        String name = myPackage.getImplementationTitle();
+        return (name != null) ? name : DEFAULT_NAME;
     }
 
     /**
      * @return The application version from {@literal MANIFEST.MF}, or some
-     *         other string if not running from a JAR/WAR.
+     *         other string if not running from a JAR.
      */
     public static String getVersion() {
-        return ManifestReader.version;
+        Package myPackage = Application.class.getPackage();
+        String version = myPackage.getImplementationVersion();
+        return (version != null) ? version : DEFAULT_VERSION;
     }
 
     /**
      * @return Path to the temp directory used by the application. If it does
      *         not exist, it will be created.
-     * @see #isUsingSystemTempPath()
      */
     public static Path getTempPath() {
         final Configuration config = Configuration.getInstance();
@@ -107,9 +66,8 @@ public final class Application {
             } catch (FileAlreadyExistsException ignore) {
                 // This is fine.
             } catch (IOException e) {
-                System.err.println("Application.getTempPath(): " + e.getMessage());
-                System.err.println("Application.getTempPath(): " +
-                        "falling back to java.io.tmpdir");
+                LOGGER.error("getTempPath(): {} (falling back to java.io.tmpdir)",
+                        e.getMessage(), e);
             }
         }
         return Paths.get(System.getProperty("java.io.tmpdir"));
@@ -121,13 +79,6 @@ public final class Application {
      */
     public static boolean isTesting() {
         return "true".equals(System.getProperty(TEST_VM_ARGUMENT));
-    }
-
-    /**
-     * @see #getTempPath()
-     */
-    public static boolean isUsingSystemTempPath() {
-        return Paths.get(System.getProperty("java.io.tmpdir")).equals(getTempPath());
     }
 
     private Application() {}

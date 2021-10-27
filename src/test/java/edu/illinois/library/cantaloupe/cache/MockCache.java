@@ -3,39 +3,57 @@ package edu.illinois.library.cantaloupe.cache;
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.operation.OperationList;
-import org.apache.commons.io.output.NullOutputStream;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.Optional;
 
 class MockCache implements DerivativeCache, SourceCache {
 
-    private boolean initializeCalled = false;
-    private boolean shutdownCalled = false;
+    private boolean isCleanUpCalled, isInitializeCalled, isOnCacheWorkerCalled,
+            isPurgeInvalidCalled, isShutdownCalled;
 
     @Override
-    public Info getImageInfo(Identifier identifier) {
-        return null;
+    public void cleanUp() {
+        isCleanUpCalled = true;
     }
 
     @Override
-    public Path getSourceImageFile(Identifier identifier) throws IOException {
-        return null;
+    public Optional<Info> getInfo(Identifier identifier) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<Path> getSourceImageFile(Identifier identifier)
+            throws IOException {
+        return Optional.empty();
     }
 
     @Override
     public void initialize() {
-        initializeCalled = true;
+        isInitializeCalled = true;
+    }
+
+    boolean isCleanUpCalled() {
+        return isCleanUpCalled;
     }
 
     boolean isInitializeCalled() {
-        return initializeCalled;
+        return isInitializeCalled;
+    }
+
+    boolean isOnCacheWorkerCalled() {
+        return isOnCacheWorkerCalled;
+    }
+
+    boolean isPurgeInvalidCalled() {
+        return isPurgeInvalidCalled;
     }
 
     boolean isShutdownCalled() {
-        return shutdownCalled;
+        return isShutdownCalled;
     }
 
     @Override
@@ -45,15 +63,21 @@ class MockCache implements DerivativeCache, SourceCache {
     }
 
     @Override
-    public OutputStream newDerivativeImageOutputStream(OperationList opList)
-            throws IOException {
+    public CompletableOutputStream
+    newDerivativeImageOutputStream(OperationList opList) throws IOException {
         return null;
     }
 
     @Override
     public OutputStream newSourceImageOutputStream(Identifier identifier)
             throws IOException {
-        return new NullOutputStream();
+        return OutputStream.nullOutputStream();
+    }
+
+    @Override
+    public void onCacheWorker() {
+        DerivativeCache.super.onCacheWorker();
+        isOnCacheWorkerCalled = true;
     }
 
     @Override
@@ -66,14 +90,19 @@ class MockCache implements DerivativeCache, SourceCache {
     public void purge(OperationList opList) {}
 
     @Override
-    public void purgeInvalid() {}
+    public void purgeInvalid() {
+        isPurgeInvalidCalled = true;
+    }
 
     @Override
-    public void put(Identifier identifier, Info imageInfo) {}
+    public void put(Identifier identifier, Info info) {}
+
+    @Override
+    public void put(Identifier identifier, String info) {}
 
     @Override
     public void shutdown() {
-        shutdownCalled = true;
+        isShutdownCalled = true;
     }
 
 }

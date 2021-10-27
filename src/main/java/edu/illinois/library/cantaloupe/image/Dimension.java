@@ -2,6 +2,8 @@ package edu.illinois.library.cantaloupe.image;
 
 import edu.illinois.library.cantaloupe.util.StringUtils;
 
+import java.util.List;
+
 /**
  * <p>Two-dimensional area, typically an image area. Values are stored as
  * doubles, in contrast to {@link java.awt.Dimension}.</p>
@@ -13,6 +15,47 @@ public final class Dimension {
     private static final double DELTA = 0.00000001;
 
     private double width, height;
+
+    /**
+     * @param levels Resolution levels in order from largest to smallest.
+     * @return       Whether the given dimensions appear to comprise a pyramid
+     *               of successively half-scaled dimensions.
+     * @since 5.0
+     */
+    public static boolean isPyramid(List<Dimension> levels) {
+        boolean isPyramid   = false;
+        final int numImages = levels.size();
+        if (numImages > 1) {
+            isPyramid = true;
+            double expectedWidth = 0, expectedHeight = 0;
+            // Either dimension may deviate from expectations by this amount.
+            final short tolerance = 2;
+            for (int i = 0; i < numImages; i++) {
+                Dimension size = levels.get(i);
+                if (i > 0 && (Math.abs(size.width() - expectedWidth) > tolerance ||
+                        Math.abs(size.height() - expectedHeight) > tolerance)) {
+                    isPyramid = false;
+                    break;
+                }
+                expectedWidth = size.width() / 2.0;
+                expectedHeight = size.height() / 2.0;
+            }
+        }
+        return isPyramid;
+    }
+
+    /**
+     * @param size       Pre-scaled size.
+     * @param scaledArea Area to fill.
+     * @return           Resulting dimensions when {@code size} is scaled to
+     *                   fill {@code scaledArea}.
+     */
+    public static Dimension ofScaledArea(Dimension size, int scaledArea) {
+        double aspectRatio = size.width() / size.height();
+        double height      = Math.sqrt(scaledArea / aspectRatio);
+        double width       = scaledArea / height;
+        return new Dimension(width, height);
+    }
 
     /**
      * Double constructor.
@@ -36,6 +79,10 @@ public final class Dimension {
      */
     public Dimension(Dimension dimension) {
         this(dimension.width(), dimension.height());
+    }
+
+    public double area() {
+        return width * height;
     }
 
     @Override
@@ -62,6 +109,10 @@ public final class Dimension {
 
     public double height() {
         return height;
+    }
+
+    public int intArea() {
+        return (int) Math.round(area());
     }
 
     /**

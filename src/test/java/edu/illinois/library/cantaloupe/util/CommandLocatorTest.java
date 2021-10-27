@@ -1,33 +1,33 @@
 package edu.illinois.library.cantaloupe.util;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class CommandLocatorTest {
 
     @Test
-    public void locateWithUnixPath() {
+    void locateWithUnixPath() {
         assertEquals("/opt/bin" + File.separator + "bin1",
                 CommandLocator.locate("bin1", "/opt/bin"));
     }
 
     @Test
-    public void locateWithUnixPathAndTrailingSlash() {
+    void locateWithUnixPathAndTrailingSlash() {
         assertEquals("/opt/bin" + File.separator + "bin1",
                 CommandLocator.locate("bin1", "/opt/bin" + File.separator));
     }
 
     @Test
-    public void locateWithWindowsPath() {
+    void locateWithWindowsPath() {
         assertEquals("c:\\Program Files\\dir" + File.separator + "bin1",
                 CommandLocator.locate("bin1", "c:\\Program Files\\dir"));
     }
 
     @Test
-    public void locateWithWindowsPathAndTrailingSlash() {
+    void locateWithWindowsPathAndTrailingSlash() {
         assertEquals("c:\\Program Files\\dir" + File.separator + "bin1",
                 CommandLocator.locate("bin1", "c:\\Program Files\\dir" + File.separator));
     }

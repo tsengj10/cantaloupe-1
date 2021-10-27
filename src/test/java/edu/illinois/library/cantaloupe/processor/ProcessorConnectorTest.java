@@ -10,18 +10,15 @@ import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.source.FileSource;
 import edu.illinois.library.cantaloupe.source.MockStreamSource;
 import edu.illinois.library.cantaloupe.source.Source;
 import edu.illinois.library.cantaloupe.source.SourceFactory;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
-import edu.illinois.library.cantaloupe.source.StreamSource;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
 import edu.illinois.library.cantaloupe.test.WebServer;
-import org.apache.commons.io.IOUtils;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -31,10 +28,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Arrays;
 import java.util.concurrent.Future;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ProcessorConnectorTest extends BaseTest {
 
@@ -43,7 +39,7 @@ public class ProcessorConnectorTest extends BaseTest {
     private ProcessorConnector instance;
 
     private static void recursiveDeleteOnExit(Path dir) throws IOException {
-        Files.walkFileTree(dir, new SimpleFileVisitor<Path>() {
+        Files.walkFileTree(dir, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file,
                                              BasicFileAttributes attrs) {
@@ -59,7 +55,7 @@ public class ProcessorConnectorTest extends BaseTest {
         });
     }
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
@@ -77,7 +73,7 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     @Test
-    public void testGetFallbackRetrievalStrategy() {
+    void testGetFallbackRetrievalStrategy() {
         final Configuration config = Configuration.getInstance();
         // config set to stream
         config.setProperty(Key.PROCESSOR_FALLBACK_RETRIEVAL_STRATEGY,
@@ -104,7 +100,7 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     @Test
-    public void testGetStreamProcessorRetrievalStrategy() {
+    void testGetStreamProcessorRetrievalStrategy() {
         final Configuration config = Configuration.getInstance();
         // config set to stream
         config.setProperty(Key.PROCESSOR_STREAM_RETRIEVAL_STRATEGY,
@@ -131,36 +127,35 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     @Test
-    public void testConnectWithFileSourceAndFileProcessor() throws Exception {
+    void testConnectWithFileSourceAndFileProcessor() throws Exception {
         final Source source = new SourceFactory().newSource(IDENTIFIER, null);
-        final Processor processor = new ProcessorFactory().newProcessor(Format.JPG);
+        final Processor processor = new ProcessorFactory().newProcessor(Format.get("jpg"));
 
-        assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+        assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
-        assertEquals(
-                ((FileSource) source).getPath(),
+        assertEquals(source.getFile(),
                 ((FileProcessor) processor).getSourceFile());
     }
 
     @Test
-    public void testConnectWithFileSourceAndStreamProcessor()
+    void testConnectWithFileSourceAndStreamProcessor()
             throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_FALLBACK, MockStreamProcessor.class.getName());
 
         final Source source = new SourceFactory().newSource(IDENTIFIER, null);
-        final Processor processor = new ProcessorFactory().newProcessor(Format.JPG);
+        final Processor processor = new ProcessorFactory().newProcessor(Format.get("jpg"));
 
-        assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+        assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
-        StreamFactory ss1 = ((StreamSource) source).newStreamFactory();
+        StreamFactory ss1 = source.newStreamFactory();
         StreamFactory ss2 = ((StreamProcessor) processor).getStreamFactory();
 
         assertEqualSources(ss1, ss2);
     }
 
     @Test
-    public void testConnectWithStreamSourceAndFileProcessorAndDownloadStrategy()
+    void testConnectWithStreamSourceAndFileProcessorAndDownloadStrategy()
             throws Exception {
         final WebServer server = new WebServer();
         try {
@@ -180,16 +175,16 @@ public class ProcessorConnectorTest extends BaseTest {
 
             final Source source = new SourceFactory().newSource(
                     identifier, null);
-            final Processor processor = new ProcessorFactory().newProcessor(Format.JP2);
+            final Processor processor = new ProcessorFactory().newProcessor(Format.get("jp2"));
 
-            assertNotNull(instance.connect(source, processor, identifier, Format.JPG));
+            assertNotNull(instance.connect(source, processor, identifier, Format.get("jpg")));
         } finally {
             server.stop();
         }
     }
 
     @Test
-    public void testConnectWithStreamSourceAndFileProcessorAndCacheStrategyAndSourceCacheAvailable()
+    void testConnectWithStreamSourceAndFileProcessorAndCacheStrategyAndSourceCacheAvailable()
             throws Exception {
         final WebServer server = new WebServer();
         final Path cacheFolder = Files.createTempDirectory("test");
@@ -213,12 +208,12 @@ public class ProcessorConnectorTest extends BaseTest {
                     RetrievalStrategy.CACHE.getConfigValue());
 
             final Source source = new SourceFactory().newSource(identifier, null);
-            final Processor processor = new ProcessorFactory().newProcessor(Format.JP2);
+            final Processor processor = new ProcessorFactory().newProcessor(Format.get("jp2"));
 
-            assertNull(instance.connect(source, processor, identifier, Format.JPG));
+            assertNull(instance.connect(source, processor, identifier, Format.get("jpg")));
 
             assertEquals(
-                    CacheFactory.getSourceCache().getSourceImageFile(identifier),
+                    CacheFactory.getSourceCache().get().getSourceImageFile(identifier).orElseThrow(),
                     ((FileProcessor) processor).getSourceFile());
         } finally {
             server.stop();
@@ -226,8 +221,8 @@ public class ProcessorConnectorTest extends BaseTest {
         }
     }
 
-    @Test(expected = CacheDisabledException.class)
-    public void testConnectWithStreamSourceAndFileProcessorAndCacheStrategyAndSourceCacheDisabled()
+    @Test
+    void testConnectWithStreamSourceAndFileProcessorAndCacheStrategyAndSourceCacheDisabled()
             throws Exception {
         final Identifier identifier = new Identifier("jp2");
         Configuration config = Configuration.getInstance();
@@ -238,13 +233,14 @@ public class ProcessorConnectorTest extends BaseTest {
                 RetrievalStrategy.CACHE.getConfigValue());
 
         final Source source = new SourceFactory().newSource(identifier, null);
-        final Processor processor = new ProcessorFactory().newProcessor(Format.JP2);
+        final Processor processor = new ProcessorFactory().newProcessor(Format.get("jp2"));
 
-        instance.connect(source, processor, identifier, Format.JPG);
+        assertThrows(CacheDisabledException.class,
+                () -> instance.connect(source, processor, identifier, Format.get("jpg")));
     }
 
-    @Test(expected = IncompatibleSourceException.class)
-    public void testConnectWithStreamSourceAndFileProcessorAndAbortStrategy()
+    @Test
+    void testConnectWithStreamSourceAndFileProcessorAndAbortStrategy()
             throws Exception {
         final Identifier identifier = new Identifier("jp2");
         Configuration config = Configuration.getInstance();
@@ -255,13 +251,14 @@ public class ProcessorConnectorTest extends BaseTest {
                 RetrievalStrategy.ABORT.getConfigValue());
 
         final Source source = new SourceFactory().newSource(identifier, null);
-        final Processor processor = new ProcessorFactory().newProcessor(Format.JP2);
+        final Processor processor = new ProcessorFactory().newProcessor(Format.get("jp2"));
 
-        instance.connect(source, processor, identifier, Format.JPG);
+        assertThrows(IncompatibleSourceException.class,
+                () -> instance.connect(source, processor, identifier, Format.get("jpg")));
     }
 
     @Test
-    public void testConnectWithStreamSourceAndFileProcessorAndStrategyNotSet()
+    void testConnectWithStreamSourceAndFileProcessorAndStrategyNotSet()
             throws Exception {
         final WebServer server = new WebServer();
         try {
@@ -277,16 +274,16 @@ public class ProcessorConnectorTest extends BaseTest {
                     MockFileProcessor.class.getName());
 
             final Source source = new SourceFactory().newSource(identifier, null);
-            final Processor processor = new ProcessorFactory().newProcessor(Format.JP2);
+            final Processor processor = new ProcessorFactory().newProcessor(Format.get("jp2"));
 
-            assertNotNull(instance.connect(source, processor, identifier, Format.JPG));
+            assertNotNull(instance.connect(source, processor, identifier, Format.get("jpg")));
         } finally {
             server.stop();
         }
     }
 
     @Test
-    public void testConnectWithStreamSourceAndStreamProcessorWithStreamStrategy()
+    void testConnectWithStreamSourceAndStreamProcessorWithStreamStrategy()
             throws Exception {
         final WebServer server = new WebServer();
         try {
@@ -302,9 +299,9 @@ public class ProcessorConnectorTest extends BaseTest {
             final Source source = new SourceFactory().newSource(IDENTIFIER, null);
             final StreamProcessor processor = new MockStreamProcessor();
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+            assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
-            StreamFactory ss1 = ((StreamSource) source).newStreamFactory();
+            StreamFactory ss1 = source.newStreamFactory();
             StreamFactory ss2 = processor.getStreamFactory();
 
             assertEqualSources(ss1, ss2);
@@ -314,7 +311,7 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     @Test
-    public void testConnectWithStreamSourceAndStreamProcessorWithDownloadStrategy()
+    void testConnectWithStreamSourceAndStreamProcessorWithDownloadStrategy()
             throws Exception {
         final WebServer server = new WebServer();
         final Path cacheFolder = Files.createTempDirectory("test");
@@ -334,7 +331,7 @@ public class ProcessorConnectorTest extends BaseTest {
             final Processor processor = new MockStreamProcessor();
 
             Future<Path> tempFile = instance.connect(source, processor,
-                    IDENTIFIER, Format.JPG);
+                    IDENTIFIER, Format.get("jpg"));
             Files.delete(tempFile.get());
         } finally {
             server.stop();
@@ -342,7 +339,7 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     @Test
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheAvailable()
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheAvailable()
             throws Exception {
         final WebServer server = new WebServer();
         final Path cacheFolder = Files.createTempDirectory("test");
@@ -361,10 +358,10 @@ public class ProcessorConnectorTest extends BaseTest {
             final Source source = new SourceFactory().newSource(IDENTIFIER, null);
             final StreamProcessor processor = new MockStreamProcessor();
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+            assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
             assertEqualSources(
-                    CacheFactory.getSourceCache().getSourceImageFile(IDENTIFIER),
+                    CacheFactory.getSourceCache().get().getSourceImageFile(IDENTIFIER).orElseThrow(),
                     processor.getStreamFactory());
         } finally {
             server.stop();
@@ -373,7 +370,7 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     @Test
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheAvailableAndSourceSupportingDirectSeekingAndProcessorSupportingSeeking()
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheAvailableAndSourceSupportingDirectSeekingAndProcessorSupportingSeeking()
             throws Exception {
         final WebServer server = new WebServer();
         final Path cacheFolder = Files.createTempDirectory("test");
@@ -397,9 +394,9 @@ public class ProcessorConnectorTest extends BaseTest {
             final MockStreamProcessor processor = new MockStreamProcessor();
             processor.setSeeking(true);
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+            assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
-            StreamFactory ss1 = ((StreamSource) source).newStreamFactory();
+            StreamFactory ss1 = source.newStreamFactory();
             StreamFactory ss2 = processor.getStreamFactory();
 
             assertEqualSources(ss1, ss2);
@@ -410,7 +407,7 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     @Test
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheAvailableAndSourceSupportingDirectSeekingAndProcessorNotSupportingSeeking()
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheAvailableAndSourceSupportingDirectSeekingAndProcessorNotSupportingSeeking()
             throws Exception {
         final WebServer server = new WebServer();
         final Path cacheFolder = Files.createTempDirectory("test");
@@ -434,10 +431,10 @@ public class ProcessorConnectorTest extends BaseTest {
             final MockStreamProcessor processor = new MockStreamProcessor();
             processor.setSeeking(false);
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+            assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
             assertEqualSources(
-                    CacheFactory.getSourceCache().getSourceImageFile(IDENTIFIER),
+                    CacheFactory.getSourceCache().get().getSourceImageFile(IDENTIFIER).orElseThrow(),
                     processor.getStreamFactory());
         } finally {
             server.stop();
@@ -446,14 +443,14 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     /**
-     * Tests that {@link ProcessorConnector#connect} passes through an
-     * {@link IOException} thrown by {@link
+     * Tests that {@link ProcessorConnector#connect(Source, Processor,
+     * Identifier, Format)} passes through an {@link IOException} thrown by
+     * {@link
      * edu.illinois.library.cantaloupe.cache.SourceCache#getSourceImageFile(Identifier)}
-     * when using
-     * {@link RetrievalStrategy#CACHE}.
+     * when using {@link RetrievalStrategy#CACHE}.
      */
-    @Test(expected = IOException.class)
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheGetSourceImageFileThrowingException()
+    @Test
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheGetSourceImageFileThrowingException()
             throws Exception {
         final WebServer server = new WebServer();
         try {
@@ -473,25 +470,22 @@ public class ProcessorConnectorTest extends BaseTest {
             final Source source = new SourceFactory().newSource(IDENTIFIER, null);
             final StreamProcessor processor = new MockStreamProcessor();
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
-
-            assertEqualSources(
-                    CacheFactory.getSourceCache().getSourceImageFile(IDENTIFIER),
-                    processor.getStreamFactory());
+            assertThrows(IOException.class,
+                    () -> instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
         } finally {
             server.stop();
         }
     }
 
     /**
-     * Tests that {@link ProcessorConnector#connect} passes through an
-     * {@link IOException} thrown by {@link
+     * Tests that {@link ProcessorConnector#connect(Source, Processor,
+     * Identifier, Format)} passes through an {@link IOException} thrown by
+     * {@link
      * edu.illinois.library.cantaloupe.cache.SourceCache#newSourceImageOutputStream(Identifier)}
-     * when using
-     * {@link RetrievalStrategy#CACHE}.
+     * when using {@link RetrievalStrategy#CACHE}.
      */
-    @Test(expected = IOException.class)
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheNewSourceImageOutputStreamThrowingException()
+    @Test
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheNewSourceImageOutputStreamThrowingException()
             throws Exception {
         final WebServer server = new WebServer();
         try {
@@ -508,24 +502,22 @@ public class ProcessorConnectorTest extends BaseTest {
             final Source source = new SourceFactory().newSource(IDENTIFIER, null);
             final StreamProcessor processor = new MockStreamProcessor();
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
-
-            Path cacheFile = CacheFactory.getSourceCache().getSourceImageFile(IDENTIFIER);
-            assertEqualSources(cacheFile, processor.getStreamFactory());
+            assertThrows(IOException.class,
+                    () -> instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
         } finally {
             server.stop();
         }
     }
 
     /**
-     * Tests that {@link ProcessorConnector#connect} recovers when using
-     * {@link RetrievalStrategy#CACHE}
+     * Tests that {@link ProcessorConnector#connect(Source, Processor,
+     * Identifier, Format)} recovers when using {@link RetrievalStrategy#CACHE}
      * and {@link
      * edu.illinois.library.cantaloupe.cache.SourceCache#getSourceImageFile(Identifier)}
      * throws an {@link IOException} only once.
      */
     @Test
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheGetSourceImageFileRetries()
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheGetSourceImageFileRetries()
             throws Exception {
         final WebServer server = new WebServer();
         try {
@@ -542,10 +534,10 @@ public class ProcessorConnectorTest extends BaseTest {
             final Source source = new SourceFactory().newSource(IDENTIFIER, null);
             final StreamProcessor processor = new MockStreamProcessor();
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+            assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
             assertEqualSources(
-                    CacheFactory.getSourceCache().getSourceImageFile(IDENTIFIER),
+                    CacheFactory.getSourceCache().get().getSourceImageFile(IDENTIFIER).orElseThrow(),
                     processor.getStreamFactory());
         } finally {
             server.stop();
@@ -553,14 +545,14 @@ public class ProcessorConnectorTest extends BaseTest {
     }
 
     /**
-     * Tests that {@link ProcessorConnector#connect} recovers when using
-     * {@link RetrievalStrategy#CACHE}
+     * Tests that {@link ProcessorConnector#connect(Source, Processor,
+     * Identifier, Format)} recovers when using {@link RetrievalStrategy#CACHE}
      * and {@link
      * edu.illinois.library.cantaloupe.cache.SourceCache#newSourceImageOutputStream(Identifier)}
      * throws an {@link IOException} only once.
      */
     @Test
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheNewSourceImageOutputStreamRetries()
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheNewSourceImageOutputStreamRetries()
             throws Exception {
         final WebServer server = new WebServer();
         try {
@@ -580,18 +572,18 @@ public class ProcessorConnectorTest extends BaseTest {
             final Source source = new SourceFactory().newSource(IDENTIFIER, null);
             final StreamProcessor processor = new MockStreamProcessor();
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+            assertNull(instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
 
             assertEqualSources(
-                    CacheFactory.getSourceCache().getSourceImageFile(IDENTIFIER),
+                    CacheFactory.getSourceCache().get().getSourceImageFile(IDENTIFIER).orElseThrow(),
                     processor.getStreamFactory());
         } finally {
             server.stop();
         }
     }
 
-    @Test(expected = CacheDisabledException.class)
-    public void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheDisabled()
+    @Test
+    void testConnectWithStreamSourceAndStreamProcessorWithCacheStrategyAndSourceCacheDisabled()
             throws Exception {
         final WebServer server = new WebServer();
         final Path cacheFolder = Files.createTempDirectory("test");
@@ -609,7 +601,8 @@ public class ProcessorConnectorTest extends BaseTest {
             final Source source = new SourceFactory().newSource(IDENTIFIER, null);
             final Processor processor = new MockStreamProcessor();
 
-            assertNull(instance.connect(source, processor, IDENTIFIER, Format.JPG));
+            assertThrows(CacheDisabledException.class,
+                    () -> instance.connect(source, processor, IDENTIFIER, Format.get("jpg")));
         } finally {
             server.stop();
             recursiveDeleteOnExit(cacheFolder);
@@ -628,15 +621,11 @@ public class ProcessorConnectorTest extends BaseTest {
 
     private void assertEqualSources(InputStream is1, InputStream is2)
             throws IOException {
-        try {
-            ByteArrayOutputStream os1 = new ByteArrayOutputStream();
-            ByteArrayOutputStream os2 = new ByteArrayOutputStream();
-            IOUtils.copy(is1, os1);
-            IOUtils.copy(is2, os2);
-            assertTrue(Arrays.equals(os1.toByteArray(), os2.toByteArray()));
-        } finally {
-            is1.close();
-            is2.close();
+        try (ByteArrayOutputStream os1 = new ByteArrayOutputStream();
+             ByteArrayOutputStream os2 = new ByteArrayOutputStream()) {
+            is1.transferTo(os1);
+            is2.transferTo(os2);
+            assertArrayEquals(os1.toByteArray(), os2.toByteArray());
         }
     }
 

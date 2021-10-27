@@ -7,13 +7,9 @@ import edu.illinois.library.cantaloupe.image.Compression;
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Metadata;
-import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.image.Rectangle;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.Crop;
-import edu.illinois.library.cantaloupe.operation.CropByPercent;
-import edu.illinois.library.cantaloupe.operation.Operation;
-import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
 import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
@@ -64,7 +60,7 @@ final class RAFTImageReader extends AbstractIIOImageReader
             });
 
     @Override
-    String[] getApplicationPreferredIIOImplementations() {
+    protected String[] getApplicationPreferredIIOImplementations() {
         return new String[]{"org.lsst.fits.imageio.CameraImageReader"};
     }
 
@@ -74,12 +70,12 @@ final class RAFTImageReader extends AbstractIIOImageReader
     }
 
     @Override
-    Format getFormat() {
-        return Format.RAFT;
+    protected Format getFormat() {
+        return Format.get("raft");
     }
 
     @Override
-    Logger getLogger() {
+    protected Logger getLogger() {
         return LOGGER;
     }
 
@@ -89,7 +85,7 @@ final class RAFTImageReader extends AbstractIIOImageReader
     }
 
     @Override
-    String getUserPreferredIIOImplementation() {
+    protected String getUserPreferredIIOImplementation() {
         Configuration config = Configuration.getInstance();
         return config.getString(IMAGEIO_PLUGIN_CONFIG_KEY);
     }
@@ -105,27 +101,25 @@ final class RAFTImageReader extends AbstractIIOImageReader
     }
 
     @Override
-    public BufferedImage read(OperationList ops, Orientation orientation, ReductionFactor reductionFactor, Set<ReaderHint> hints) throws IOException {
-        for (Operation op : ops) {
-            LOGGER.info("RAFT: Op = " + op);
-        }
+    public BufferedImage read(final int imageIndex,
+                              final Crop crop,
+                              final Scale scale,
+                              final ScaleConstraint scaleConstraint,
+                              final ReductionFactor reductionFactor,
+                              final Set<ReaderHint> hints) throws IOException {
+
         LOGGER.info("RAFT: ReductionFactor=" + reductionFactor);
         LOGGER.info("RAFT: hints=" + hints);
         LOGGER.info("RAFT: iioReader=" + iioReader);
 
-        Scale scale = (Scale) ops.getFirst(Scale.class);
         if (scale != null && iioReader != null) {
-            Crop crop = (Crop) ops.getFirst(Crop.class);
-            if (crop == null) {
-                crop = new CropByPercent();
-            }
-            ScaleConstraint scaleConstraint = ops.getScaleConstraint();
             final Dimension fullSize = new Dimension(iioReader.getWidth(0), iioReader.getHeight(0));
             final Rectangle regionRect = crop.getRectangle(fullSize, new ReductionFactor(), scaleConstraint);
             LOGGER.info("RAFT: regionRect=" + regionRect);
             Dimension resultingSize = scale.getResultingSize(fullSize, reductionFactor, scaleConstraint);
             LOGGER.info("RAFT: resultingSize=" + resultingSize);
-            ImageReadParam readParam = getDefaultReadParam(ops.getOptions());
+            // TODO: Figure out how to get options map
+            ImageReadParam readParam = getDefaultReadParam(Collections.EMPTY_MAP);
             int subSamplingX = 1;
             int subSamplingY = 1;
             if (regionRect.width() * regionRect.height() > Integer.MAX_VALUE) {
@@ -141,14 +135,14 @@ final class RAFTImageReader extends AbstractIIOImageReader
             hints.add(ReaderHint.ALREADY_CROPPED);
             return iioReader.read(0, readParam);
         } else {
-            return super.read(ops, orientation, reductionFactor, hints);
+            return super.read(imageIndex, crop, scale, scaleConstraint, reductionFactor, hints);
         }
     }
 
     @Override
-    public BufferedImage read() throws IOException {
+    public BufferedImage read(int imageIndex) throws IOException {
         ImageReadParam readParam = getDefaultReadParam(Collections.EMPTY_MAP);
-        return iioReader.read(0, readParam);
+        return iioReader.read(imageIndex, readParam);
     }
 
     private ImageReadParam getDefaultReadParam(Map<String, Object> opts) {

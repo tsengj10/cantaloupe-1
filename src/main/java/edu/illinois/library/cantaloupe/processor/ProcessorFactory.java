@@ -5,7 +5,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.InvocationTargetException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -21,18 +20,15 @@ public final class ProcessorFactory {
     private static final Logger LOGGER =
             LoggerFactory.getLogger(ProcessorFactory.class);
 
-    private static final Set<Class<? extends Processor>> ALL_PROCESSOR_IMPLS =
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
-                    FfmpegProcessor.class,
-                    GraphicsMagickProcessor.class,
-                    ImageMagickProcessor.class,
-                    JaiProcessor.class,
-                    Java2dProcessor.class,
-                    KakaduDemoProcessor.class,
-                    KakaduNativeProcessor.class,
-                    OpenJpegProcessor.class,
-                    PdfBoxProcessor.class,
-                    TurboJpegProcessor.class)));
+    private static final Set<Class<? extends Processor>> ALL_PROCESSOR_IMPLS = Set.of(
+            FfmpegProcessor.class,
+            JaiProcessor.class,
+            Java2dProcessor.class,
+            KakaduNativeProcessor.class,
+            OpenJpegProcessor.class,
+            GrokProcessor.class,
+            PdfBoxProcessor.class,
+            TurboJpegProcessor.class);
 
     private static final Set<Processor> ALL_PROCESSORS = new HashSet<>();
 
@@ -93,7 +89,7 @@ public final class ProcessorFactory {
      *                     format, based on configuration settings.
      */
     public Processor newProcessor(final Format sourceFormat)
-            throws UnsupportedSourceFormatException,
+            throws SourceFormatException,
             InitializationException,
             ReflectiveOperationException {
         final List<Class<? extends Processor>> candidates =
@@ -108,13 +104,13 @@ public final class ProcessorFactory {
                     candidate.setSourceFormat(sourceFormat);
                     LOGGER.debug("{} selected for format {} ({} offered {})",
                             candidate.getClass().getSimpleName(),
-                            sourceFormat.name(),
+                            sourceFormat.getName(),
                             getSelectionStrategy(),
                             candidates.stream()
                                     .map(Class::getSimpleName)
                                     .collect(Collectors.joining(", ")));
                     return candidate;
-                } catch (UnsupportedSourceFormatException ignore) {}
+                } catch (SourceFormatException ignore) {}
             } else {
                 if (selectionStrategy instanceof AutomaticSelectionStrategy) {
                     LOGGER.debug("Failed to initialize {} (error: {})",
@@ -131,7 +127,7 @@ public final class ProcessorFactory {
         if (errorMsg != null) {
             throw new InitializationException(errorMsg);
         }
-        throw new UnsupportedSourceFormatException(sourceFormat);
+        throw new SourceFormatException(sourceFormat);
     }
 
     void setSelectionStrategy(SelectionStrategy selectionStrategy) {

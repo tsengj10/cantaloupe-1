@@ -8,7 +8,9 @@ import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Info;
+import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.image.Rectangle;
+import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.Operation;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
@@ -17,9 +19,9 @@ import edu.illinois.library.cantaloupe.operation.Crop;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReader;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReaderFactory;
 import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
-import edu.illinois.library.cantaloupe.processor.codec.JPEG2000MetadataReader;
+import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFacade;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg2000.JPEG2000MetadataReader;
 import edu.illinois.library.cantaloupe.processor.codec.ReaderHint;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 import edu.illinois.library.cantaloupe.source.stream.BufferedImageInputStream;
 import edu.illinois.library.cantaloupe.util.CommandLocator;
 import org.apache.commons.io.IOUtils;
@@ -37,6 +39,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -130,7 +133,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
     /**
      * Set by {@link #initialize()}.
      */
-    private static final AtomicBoolean initializationAttempted =
+    private static final AtomicBoolean IS_INITIALIZATION_ATTEMPTED =
             new AtomicBoolean(false);
 
     /**
@@ -142,7 +145,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
      * @see <a href="https://github.com/cantaloupe-project/cantaloupe/issues/190">
      *     OpenJpegProcessor operating on low bit-depth images</a>
      */
-    private final static Format intermediateFormat = Format.BMP;
+    private final static Format intermediateFormat = Format.get("bmp");
 
     private Path sourceFile;
 
@@ -186,7 +189,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
     }
 
     private static synchronized void initialize() {
-        initializationAttempted.set(true);
+        IS_INITIALIZATION_ATTEMPTED.set(true);
 
         try {
             // Check for the presence of opj_decompress.
@@ -280,7 +283,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
      * For testing only!
      */
     static synchronized void resetInitialization() {
-        initializationAttempted.set(false);
+        IS_INITIALIZATION_ATTEMPTED.set(false);
         initializationError = null;
     }
 
@@ -296,7 +299,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
     }
 
     OpenJpegProcessor() {
-        if (!initializationAttempted.get()) {
+        if (!IS_INITIALIZATION_ATTEMPTED.get()) {
             initialize();
         }
     }
@@ -333,7 +336,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
     @Override
     public Set<Format> getAvailableOutputFormats() {
         final Set<Format> outputFormats;
-        if (Format.JP2.equals(getSourceFormat())) {
+        if (Format.get("jp2").equals(getSourceFormat())) {
             outputFormats = ImageWriterFactory.supportedFormats();
         } else {
             outputFormats = Collections.unmodifiableSet(Collections.emptySet());
@@ -343,7 +346,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
 
     @Override
     public String getInitializationError() {
-        if (!initializationAttempted.get()) {
+        if (!IS_INITIALIZATION_ATTEMPTED.get()) {
             initialize();
         }
         return initializationError;
@@ -352,21 +355,6 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
     @Override
     public Path getSourceFile() {
         return sourceFile;
-    }
-
-    @Override
-    public Set<ProcessorFeature> getSupportedFeatures() {
-        return Java2DPostProcessor.SUPPORTED_FEATURES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality> getSupportedIIIF1Qualities() {
-        return Java2DPostProcessor.SUPPORTED_IIIF_1_QUALITIES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality> getSupportedIIIF2Qualities() {
-        return Java2DPostProcessor.SUPPORTED_IIIF_2_QUALITIES;
     }
 
     @Override
@@ -392,8 +380,12 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
                 try {
                     Files.setLastModifiedTime(sourceFile,
                             FileTime.from(Instant.now()));
+                } catch (FileSystemException e) {
+                    // Probably a read-only filesystem
+                    LOGGER.debug("setSourceFile(): failed to touch file: {}",
+                            e.getMessage());
                 } catch (IOException e) {
-                    LOGGER.error("setSourceFile(): failed to touch file: {}",
+                    LOGGER.warn("setSourceFile(): failed to touch file: {}",
                             e.getMessage());
                 }
             });
@@ -415,6 +407,11 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
     }
 
     @Override
+    public boolean supportsSourceFormat(Format format) {
+        return Format.get("jp2").equals(format);
+    }
+
+    @Override
     public Info readInfo() throws IOException {
         final Info info = new Info();
         info.setSourceFormat(getSourceFormat());
@@ -423,14 +420,30 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
             reader.setSource(new BufferedImageInputStream(
                     new FileImageInputStream(getSourceFile().toFile())));
 
+            final Metadata metadata = new Metadata();
+            byte[] bytes = reader.getEXIF();
+            if (bytes != null) {
+                try (edu.illinois.library.cantaloupe.image.exif.Reader exifReader =
+                             new edu.illinois.library.cantaloupe.image.exif.Reader()) {
+                    exifReader.setSource(bytes);
+                    metadata.setEXIF(exifReader.read());
+                }
+            }
+            bytes = reader.getIPTC();
+            if (bytes != null) {
+                try (edu.illinois.library.cantaloupe.image.iptc.Reader iptcReader =
+                             new edu.illinois.library.cantaloupe.image.iptc.Reader()) {
+                    iptcReader.setSource(bytes);
+                    metadata.setIPTC(iptcReader.read());
+                }
+            }
+            metadata.setXMP(reader.getXMP());
+            info.setMetadata(metadata);
             info.setNumResolutions(reader.getNumDecompositionLevels() + 1);
 
             Info.Image image = info.getImages().get(0);
-            image.setSize(new Dimension(
-                    reader.getWidth(), reader.getHeight()));
-            image.setTileSize(new Dimension(
-                    reader.getTileWidth(), reader.getTileHeight()));
-            // TODO: set orientation
+            image.setSize(new Dimension(reader.getWidth(), reader.getHeight()));
+            image.setTileSize(new Dimension(reader.getTileWidth(), reader.getTileHeight()));
             // JP2 tile dimensions are inverted, so swap them
             if ((image.width > image.height && image.tileWidth < image.tileHeight) ||
                     (image.width < image.height && image.tileWidth > image.tileHeight)) {
@@ -439,8 +452,6 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
                 image.tileWidth = image.tileHeight;
                 image.tileHeight = tmp;
             }
-
-            LOGGER.trace("readInfo(): {}", info.toJSON());
             return info;
         }
     }
@@ -459,7 +470,7 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
     @Override
     public void process(final OperationList opList,
                         final Info imageInfo,
-                        final OutputStream outputStream) throws ProcessorException {
+                        final OutputStream outputStream) throws FormatException, ProcessorException {
         super.process(opList, imageInfo, outputStream);
 
         final ByteArrayOutputStream errorBucket = new ByteArrayOutputStream();
@@ -479,12 +490,12 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
             LOGGER.debug(msg, e);
             throw new ProcessorException(msg, e);
         } catch (IOException | InterruptedException e) {
-            String msg = e.getMessage();
             final String errorStr = toString(errorBucket);
-            if (errorStr.length() > 0) {
-                msg += " (command output: " + errorStr + ")";
+            if (errorStr.contains("Unknown input file format")) {
+                throw new SourceFormatException(getSourceFormat());
             }
-            throw new ProcessorException(msg, e);
+            throw new ProcessorException(
+                    e.getMessage() + " (command output: " + errorStr + ")", e);
         }
     }
 
@@ -524,14 +535,18 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
 
         try (InputStream is = Files.newInputStream(intermediateFile)) {
             final ImageReader reader =
-                    new ImageReaderFactory().newImageReader(is, Format.BMP);
+                    new ImageReaderFactory().newImageReader(Format.get("bmp"), is);
             try {
-                final BufferedImage image = reader.read();
+                final BufferedImage image = reader.read(0);
                 final Set<ReaderHint> hints =
                         EnumSet.of(ReaderHint.ALREADY_CROPPED);
 
-                Java2DPostProcessor.postProcess(image, hints, opList, info,
-                        reductionFactor, reader.getMetadata(0), outputStream);
+                Java2DPostProcessor.postProcess(
+                        image, hints, opList, info, reductionFactor);
+
+                ImageWriterFacade.write(image,
+                        (Encode) opList.getFirst(Encode.class),
+                        outputStream);
             } finally {
                 reader.dispose();
             }
@@ -565,14 +580,18 @@ class OpenJpegProcessor extends AbstractProcessor implements FileProcessor {
                     new StreamCopier(processErrorStream, errorOutput));
 
             final ImageReader reader = new ImageReaderFactory().newImageReader(
-                    processInputStream, Format.BMP);
+                    Format.get("bmp"), processInputStream);
             try {
-                final BufferedImage image = reader.read();
                 final Set<ReaderHint> hints =
                         EnumSet.of(ReaderHint.ALREADY_CROPPED);
 
-                Java2DPostProcessor.postProcess(image, hints, opList, info,
-                        reductionFactor, reader.getMetadata(0), outputStream);
+                BufferedImage image = reader.read(0);
+                image = Java2DPostProcessor.postProcess(
+                        image, hints, opList, info, reductionFactor);
+
+                ImageWriterFacade.write(image,
+                        (Encode) opList.getFirst(Encode.class),
+                        outputStream);
 
                 final int code = process.waitFor();
                 if (code != 0) {

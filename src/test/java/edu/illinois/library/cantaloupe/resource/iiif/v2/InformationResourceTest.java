@@ -9,23 +9,23 @@ import edu.illinois.library.cantaloupe.http.Method;
 import edu.illinois.library.cantaloupe.http.ResourceException;
 import edu.illinois.library.cantaloupe.http.Response;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.image.ScaleConstraint;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
+import edu.illinois.library.cantaloupe.image.StandardMetaIdentifierTransformer;
 import edu.illinois.library.cantaloupe.resource.AbstractResource;
 import edu.illinois.library.cantaloupe.resource.ResourceTest;
 import edu.illinois.library.cantaloupe.resource.Route;
 import edu.illinois.library.cantaloupe.resource.iiif.InformationResourceTester;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import edu.illinois.library.cantaloupe.util.SystemUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.junit.Test;
+import org.apache.commons.lang3.SystemUtils;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.util.Arrays;
 import java.util.List;
 
 import static edu.illinois.library.cantaloupe.test.Assert.HTTPAssert.*;
-import static org.junit.Assert.*;
-import static org.junit.Assume.assumeTrue;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.*;
 
 /**
  * Functional test of the features of InformationResource.
@@ -34,7 +34,8 @@ public class InformationResourceTest extends ResourceTest {
 
     private static final String IMAGE = "jpg-rgb-64x56x8-baseline.jpg";
 
-    private InformationResourceTester tester = new InformationResourceTester();
+    private final InformationResourceTester tester =
+            new InformationResourceTester();
 
     @Override
     protected String getEndpointPath() {
@@ -42,64 +43,110 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETAuthorizationWhenAuthorized() {
+    void testGETAuthorizationWhenAuthorized() {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testAuthorizationWhenAuthorized(uri);
     }
 
     @Test
-    public void testGETAuthorizationWhenNotAuthorized() {
+    void testGETAuthorizationWhenNotAuthorized() {
         URI uri = getHTTPURI("/forbidden.jpg/info.json");
         tester.testAuthorizationWhenNotAuthorized(uri);
     }
 
     @Test
-    public void testGETAuthorizationWhenScaleConstraining() throws Exception {
+    void testGETAuthorizationWhenNotAuthorizedWhenAccessingCachedResource()
+            throws Exception {
+        URI uri = getHTTPURI("/forbidden.jpg/info.json");
+        tester.testAuthorizationWhenNotAuthorizedWhenAccessingCachedResource(uri);
+    }
+
+    @Test
+    void testGETAuthorizationWhenScaleConstraining() throws Exception {
         URI uri = getHTTPURI("/reduce.jpg/info.json");
         tester.testAuthorizationWhenScaleConstraining(uri);
     }
 
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable()
+    void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable(uri);
     }
 
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsNotCacheable()
+    void testGETCacheHeadersWhenClientCachingIsEnabledAndResponseIsNotCacheable()
             throws Exception {
         URI uri = getHTTPURI("/bogus/info.json");
         tester.testCacheHeadersWhenClientCachingIsEnabledAndResponseIsNotCacheable(uri);
     }
 
     /**
-     * Tests that there is no Cache-Control header returned when
-     * cache.httpClient.enabled = true but a cache=false argument is present in the
-     * URL query.
+     * Tests that there is no {@code Cache-Control} header returned when
+     * {@code cache.client.enabled = true} but a {@code cache=nocache} argument
+     * is present in the URL query.
      */
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL()
+    void testGETCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL1()
+            throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + "/info.json?cache=nocache");
+        tester.testCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL(uri);
+    }
+
+    /**
+     * Tests that there is no {@code Cache-Control} header returned when
+     * {@code cache.client.enabled = true} but a {@code cache=false} argument
+     * is present in the URL query.
+     */
+    @Test
+    void testGETCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL2()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json?cache=false");
         tester.testCacheHeadersWhenClientCachingIsEnabledButCachingIsDisabledInURL(uri);
     }
 
+    /**
+     * Tests that there is a {@code Cache-Control} header returned when
+     * {@code cache.client.enabled = true} and a {@code cache=recache} argument
+     * is present in the URL query.
+     */
     @Test
-    public void testGETCacheHeadersWhenClientCachingIsDisabled() throws Exception {
+    void testGETCacheHeadersWhenClientCachingIsEnabledAndRecachingIsEnabledInURL()
+            throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + "/info.json?cache=recache");
+        tester.testCacheHeadersWhenClientCachingIsEnabledAndResponseIsCacheable(uri);
+    }
+
+    @Test
+    void testGETCacheHeadersWhenClientCachingIsDisabled() throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testCacheHeadersWhenClientCachingIsDisabled(uri);
     }
 
     @Test
-    public void testGETCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied()
+    void testGETCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied1()
+            throws Exception {
+        URI uri = getHTTPURI("/" + IMAGE + "/info.json?cache=nocache");
+        tester.testCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied(uri);
+    }
+
+    @Test
+    void testGETCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied2()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json?cache=false");
         tester.testCachingWhenCachesAreEnabledButNegativeCacheQueryArgumentIsSupplied(uri);
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstEnabled()
+    void testGETCachingWhenCachesAreEnabledAndRecacheQueryArgumentIsSupplied()
+            throws Exception {
+        assumeFalse(SystemUtils.IS_OS_WINDOWS); // TODO: this fails in Windows
+        URI uri = getHTTPURI("/" + IMAGE + "/info.json?cache=recache");
+        tester.testCachingWhenCachesAreEnabledAndRecacheQueryArgumentIsSupplied(uri);
+    }
+
+    @Test
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -108,7 +155,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheEnabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -117,7 +164,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstEnabled()
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -126,7 +173,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheEnabledAndInfoCacheDisabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -135,7 +182,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstEnabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -144,7 +191,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheEnabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -153,7 +200,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstEnabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstEnabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -162,7 +209,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstDisabled()
+    void testGETCacheWithDerivativeCacheDisabledAndInfoCacheDisabledAndResolveFirstDisabled()
             throws Exception {
         // The image must be modified as unmodified images aren't cached.
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
@@ -171,7 +218,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETEndpointEnabled() {
+    void testGETEndpointEnabled() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, true);
 
@@ -179,7 +226,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETEndpointDisabled() {
+    void testGETEndpointDisabled() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, false);
 
@@ -187,122 +234,187 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETWithForwardSlashInIdentifier() {
+    void testGETWithForwardSlashInIdentifier() {
         URI uri = getHTTPURI("/subfolder%2Fjpg/info.json");
         tester.testForwardSlashInIdentifier(uri);
     }
 
     @Test
-    public void testGETWithBackslashInIdentifier() {
+    void testGETWithBackslashInIdentifier() {
         URI uri = getHTTPURI("/subfolder%5Cjpg/info.json");
         tester.testBackslashInIdentifier(uri);
     }
 
     @Test
-    public void testGETHTTP2() throws Exception {
+    void testGETWithIllegalCharactersInIdentifier() {
+        String uri = getHTTPURIString("/[bogus]/info.json");
+        tester.testIllegalCharactersInIdentifier(uri);
+    }
+
+    @Test
+    void testGETHTTP2() throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testHTTP2(uri);
     }
 
     @Test
-    public void testGETHTTPS1_1() throws Exception {
+    void testGETHTTPS1_1() throws Exception {
         URI uri = getHTTPSURI("/" + IMAGE + "/info.json");
         tester.testHTTPS1_1(uri);
     }
 
     @Test
-    public void testGETHTTPS2() throws Exception {
-        assumeTrue(SystemUtils.isALPNAvailable());
+    void testGETHTTPS2() throws Exception {
         URI uri = getHTTPSURI("/" + IMAGE + "/info.json");
         tester.testHTTPS2(uri);
     }
 
     @Test
-    public void testGETForbidden() {
+    void testGETForbidden() {
         URI uri = getHTTPURI("/forbidden/info.json");
         tester.testForbidden(uri);
     }
 
     @Test
-    public void testGETNotFound() {
+    void testGETNotFound() {
         URI uri = getHTTPURI("/invalid/info.json");
         tester.testNotFound(uri);
     }
 
     @Test
-    public void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsFalse()
+    void testGETWithPageNumberInMetaIdentifier() {
+        final String image = "pdf-multipage.pdf";
+        URI uri1 = getHTTPURI("/" + image + "/info.json");
+        URI uri2 = getHTTPURI("/" + image + ";2/info.json");
+        assertRepresentationsNotSame(uri1, uri2);
+    }
+
+    @Test
+    void testGETWithPageNumberInQuery() {
+        final String image = "pdf-multipage.pdf";
+        URI uri1 = getHTTPURI("/" + image + "/info.json");
+        URI uri2 = getHTTPURI("/" + image + "/info.json?page=2");
+        assertRepresentationsNotSame(uri1, uri2);
+    }
+
+    @Test
+    void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsFalse()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testPurgeFromCacheWhenSourceIsMissingAndOptionIsFalse(uri);
     }
 
     @Test
-    public void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsTrue()
+    void testGETPurgeFromCacheWhenSourceIsMissingAndOptionIsTrue()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testPurgeFromCacheWhenSourceIsMissingAndOptionIsTrue(uri);
     }
 
     @Test
-    public void testGETRecoveryFromDerivativeCacheNewDerivativeImageInputStreamException()
+    void testGETRecoveryFromDerivativeCacheNewDerivativeImageInputStreamException()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testRecoveryFromDerivativeCacheNewDerivativeImageInputStreamException(uri);
     }
 
     @Test
-    public void testGETRecoveryFromDerivativeCacheNewDerivativeImageOutputStreamException()
+    void testGETRecoveryFromDerivativeCacheNewDerivativeImageOutputStreamException()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testRecoveryFromDerivativeCacheNewDerivativeImageOutputStreamException(uri);
     }
 
+    @Test
+    void testGETRecoveryFromIncorrectSourceFormat() throws Exception {
+        URI uri = getHTTPURI("/jpg-incorrect-extension.png/info.json");
+        tester.testRecoveryFromIncorrectSourceFormat(uri);
+    }
+
     /**
-     * Tests that a scale constraint of {@literal -1:1} is redirected to no
+     * Tests that a scale constraint of {@literal 1:1} is redirected to no
      * scale constraint.
      */
     @Test
-    public void testGETRedirectToNormalizedScaleConstraint1() {
-        URI fromURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(1, 1).toIdentifierSuffix() + "/info.json");
-        URI toURI = getHTTPURI("/" + IMAGE + "/info.json");
+    void testGETRedirectToNormalizedScaleConstraint1() {
+        MetaIdentifier metaIdentifier = MetaIdentifier.builder()
+                .withIdentifier(IMAGE)
+                .withScaleConstraint(1, 1)
+                .build();
+        String metaIdentifierString = new StandardMetaIdentifierTransformer()
+                .serialize(metaIdentifier, false);
+
+        URI fromURI = getHTTPURI("/" + metaIdentifierString + "/info.json");
+        URI toURI   = getHTTPURI("/" + IMAGE + "/info.json");
         assertRedirect(fromURI, toURI, 301);
     }
 
     /**
-     * Tests that a scale constraint of {@literal -2:2} is redirected to no
+     * Tests that a scale constraint of {@literal 2:2} is redirected to no
      * scale constraint.
      */
     @Test
-    public void testGETRedirectToNormalizedScaleConstraint2() {
-        URI fromURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(2, 2).toIdentifierSuffix() + "/info.json");
-        URI toURI = getHTTPURI("/" + IMAGE + "/info.json");
+    void testGETRedirectToNormalizedScaleConstraint2() {
+        MetaIdentifier metaIdentifier = MetaIdentifier.builder()
+                .withIdentifier(IMAGE)
+                .withScaleConstraint(2, 2)
+                .build();
+        String metaIdentifierString = new StandardMetaIdentifierTransformer()
+                .serialize(metaIdentifier, false);
+
+        URI fromURI = getHTTPURI("/" + metaIdentifierString + "/info.json");
+        URI toURI   = getHTTPURI("/" + IMAGE + "/info.json");
         assertRedirect(fromURI, toURI, 301);
     }
 
     /**
-     * Tests that a scale constraint of {@literal -2:4} is redirected to
-     * {@literal -1:2}.
+     * Tests that a scale constraint of {@literal 2:4} is redirected to
+     * {@literal 1:2}.
      */
     @Test
-    public void testGETRedirectToNormalizedScaleConstraint3() {
-        URI fromURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(2, 4).toIdentifierSuffix() + "/info.json");
-        URI toURI = getHTTPURI("/" + IMAGE +
-                new ScaleConstraint(1, 2).toIdentifierSuffix() + "/info.json");
+    void testGETRedirectToNormalizedScaleConstraint3() {
+        MetaIdentifier.Builder builder = MetaIdentifier.builder()
+                .withIdentifier(IMAGE);
+        // create the "from" URI
+        MetaIdentifier metaIdentifier = builder
+                .withScaleConstraint(2, 4)
+                .build();
+        String metaIdentifierString =
+                new StandardMetaIdentifierTransformer().serialize(metaIdentifier);
+        URI fromURI = getHTTPURI("/" + metaIdentifierString + "/info.json");
+
+        // create the "to" URI
+        metaIdentifier = builder
+                .withScaleConstraint(1, 2)
+                .build();
+        metaIdentifierString =
+                new StandardMetaIdentifierTransformer().serialize(metaIdentifier);
+        URI toURI = getHTTPURI("/" + metaIdentifierString + "/info.json");
+
         assertRedirect(fromURI, toURI, 301);
     }
 
     @Test
-    public void testGETResolverCheckAccessNotCalledWithSourceCacheHit()
+    void testGETScaleConstraintIsRespected() throws Exception {
+        client = newClient("/" + IMAGE + ";1:2/info.json");
+        Response response = client.send();
+
+        String json = response.getBodyAsString();
+        ObjectMapper mapper = new ObjectMapper();
+        ImageInfo<?, ?> info = mapper.readValue(json, ImageInfo.class);
+        assertEquals(32, info.get("width"));
+        assertEquals(28, info.get("height"));
+    }
+
+    @Test
+    void testGETSourceCheckAccessNotCalledWithSourceCacheHit()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testSourceCheckAccessNotCalledWithSourceCacheHit(new Identifier(IMAGE), uri);
     }
 
     @Test
-    public void testGETResolverGetSourceFormatNotCalledWithSourceCacheHit()
+    void testGETSourceGetSourceFormatNotCalledWithSourceCacheHit()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testSourceGetFormatNotCalledWithSourceCacheHit(new Identifier(IMAGE), uri);
@@ -313,7 +425,7 @@ public class InformationResourceTest extends ResourceTest {
      * used with a non-StreamProcessor.
      */
     @Test
-    public void testGETResolverProcessorCompatibility() {
+    void testGETSourceProcessorCompatibility() {
         URI uri = getHTTPURI("/jp2/info.json");
         tester.testSourceProcessorCompatibility(
                 uri,
@@ -322,31 +434,31 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETSlashSubstitution() {
+    void testGETSlashSubstitution() {
         URI uri = getHTTPURI("/subfolderCATSjpg/info.json");
         tester.testSlashSubstitution(uri);
     }
 
     @Test
-    public void testGETUnavailableSourceFormat() {
+    void testGETUnavailableSourceFormat() {
         URI uri = getHTTPURI("/text.txt/info.json");
         tester.testUnavailableSourceFormat(uri);
     }
 
     @Test
-    public void testGETURIsInJSON() throws Exception {
+    void testGETURIsInJSON() throws Exception {
         client = newClient("/" + IMAGE + "/info.json");
         Response response = client.send();
 
         String json = response.getBodyAsString();
         ObjectMapper mapper = new ObjectMapper();
         ImageInfo<?, ?> info = mapper.readValue(json, ImageInfo.class);
-        assertEquals("http://localhost:" + HTTP_PORT +
+        assertEquals("http://localhost:" + getHTTPPort() +
                 Route.IIIF_2_PATH + "/" + IMAGE, info.get("@id"));
     }
 
     @Test
-    public void testGETURIsInJSONWithBaseURIOverride() throws Exception {
+    void testGETURIsInJSONWithBaseURIOverride() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.BASE_URI, "http://example.org/");
 
@@ -361,7 +473,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETURIsInJSONWithSlashSubstitution() throws Exception {
+    void testGETURIsInJSONWithSlashSubstitution() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.SLASH_SUBSTITUTE, "CATS");
 
@@ -372,28 +484,28 @@ public class InformationResourceTest extends ResourceTest {
         String json = response.getBodyAsString();
         ObjectMapper mapper = new ObjectMapper();
         ImageInfo<?, ?> info = mapper.readValue(json, ImageInfo.class);
-        assertEquals("http://localhost:" + HTTP_PORT +
+        assertEquals("http://localhost:" + getHTTPPort() +
                 Route.IIIF_2_PATH + path, info.get("@id"));
     }
 
     @Test
-    public void testGETURIsInJSONWithEncodedCharacters() throws Exception {
+    void testGETURIsInJSONWithEncodedCharacters() throws Exception {
         Configuration config = Configuration.getInstance();
-        config.setProperty(Key.SLASH_SUBSTITUTE, ":");
+        config.setProperty(Key.SLASH_SUBSTITUTE, "`");
 
-        final String path = "/subfolder%3Ajpg";
+        final String path = "/subfolder%60jpg";
         client = newClient(path + "/info.json");
         Response response = client.send();
 
         String json = response.getBodyAsString();
         ObjectMapper mapper = new ObjectMapper();
         ImageInfo<?, ?> info = mapper.readValue(json, ImageInfo.class);
-        assertEquals("http://localhost:" + HTTP_PORT +
+        assertEquals("http://localhost:" + getHTTPPort() +
                 Route.IIIF_2_PATH + path, info.get("@id"));
     }
 
     @Test
-    public void testGETURIsInJSONWithProxyHeaders() throws Exception {
+    void testGETURIsInJSONWithProxyHeaders() throws Exception {
         client = newClient("/" + IMAGE + "/info.json");
         client.getHeaders().set("X-Forwarded-Proto", "HTTP");
         client.getHeaders().set("X-Forwarded-Host", "example.org");
@@ -411,7 +523,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETBaseURIOverridesProxyHeaders() throws Exception {
+    void testGETBaseURIOverridesProxyHeaders() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.BASE_URI, "https://example.net/");
 
@@ -434,7 +546,7 @@ public class InformationResourceTest extends ResourceTest {
      * more thoroughly elsewhere.
      */
     @Test
-    public void testGETResponseHeaders() throws Exception {
+    void testGETResponseHeaders() throws Exception {
         client = newClient("/" + IMAGE + "/info.json");
         Response response = client.send();
         Headers headers = response.getHeaders();
@@ -445,15 +557,15 @@ public class InformationResourceTest extends ResourceTest {
         // Content-Length
         assertNotNull(headers.getFirstValue("Content-Length"));
         // Content-Type
-        assertEquals("application/json;charset=UTF-8",
-                headers.getFirstValue("Content-Type"));
+        assertTrue("application/json;charset=UTF-8".equalsIgnoreCase(
+                headers.getFirstValue("Content-Type")));
         // Date
         assertNotNull(headers.getFirstValue("Date"));
         // Server
         assertNotNull(headers.getFirstValue("Server"));
         // Vary
         List<String> parts =
-                Arrays.asList(StringUtils.split(headers.getFirstValue("Vary"), ", "));
+                List.of(StringUtils.split(headers.getFirstValue("Vary"), ", "));
         assertEquals(5, parts.size());
         assertTrue(parts.contains("Accept"));
         assertTrue(parts.contains("Accept-Charset"));
@@ -466,7 +578,7 @@ public class InformationResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testOPTIONSWhenEnabled() throws Exception {
+    void testOPTIONSWhenEnabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, true);
 
@@ -477,14 +589,14 @@ public class InformationResourceTest extends ResourceTest {
 
         Headers headers = response.getHeaders();
         List<String> methods =
-                Arrays.asList(StringUtils.split(headers.getFirstValue("Allow"), ", "));
+                List.of(StringUtils.split(headers.getFirstValue("Allow"), ", "));
         assertEquals(2, methods.size());
         assertTrue(methods.contains("GET"));
         assertTrue(methods.contains("OPTIONS"));
     }
 
     @Test
-    public void testOPTIONSWhenDisabled() throws Exception {
+    void testOPTIONSWhenDisabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, false);
         try {

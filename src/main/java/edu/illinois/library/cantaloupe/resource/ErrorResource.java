@@ -7,8 +7,9 @@ import edu.illinois.library.cantaloupe.http.Status;
 import edu.illinois.library.cantaloupe.operation.IllegalScaleException;
 import edu.illinois.library.cantaloupe.operation.IllegalSizeException;
 import edu.illinois.library.cantaloupe.operation.ValidationException;
-import edu.illinois.library.cantaloupe.processor.UnsupportedOutputFormatException;
-import edu.illinois.library.cantaloupe.processor.UnsupportedSourceFormatException;
+import edu.illinois.library.cantaloupe.processor.OutputFormatException;
+import edu.illinois.library.cantaloupe.processor.SourceFormatException;
+import edu.illinois.library.cantaloupe.resource.iiif.FormatException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,7 +20,6 @@ import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.NoSuchFileException;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -32,9 +32,9 @@ class ErrorResource extends AbstractResource {
             LoggerFactory.getLogger(ErrorResource.class);
 
     private static final List<String> SUPPORTED_MEDIA_TYPES =
-            Arrays.asList("text/plain", "text/html", "application/xhtml+xml");
+            List.of("text/plain", "text/html", "application/xhtml+xml");
 
-    private Throwable error;
+    private final Throwable error;
 
     private static Status toStatus(Throwable t) {
         Status status;
@@ -48,12 +48,13 @@ class ErrorResource extends AbstractResource {
                 t instanceof IllegalClientArgumentException ||
                 t instanceof UnsupportedEncodingException) {
             status = Status.BAD_REQUEST;
-        } else if (t instanceof UnsupportedOutputFormatException) {
+        } else if (t instanceof FormatException ||
+                t instanceof OutputFormatException) {
             status = Status.UNSUPPORTED_MEDIA_TYPE;
         } else if (t instanceof FileNotFoundException ||
                 t instanceof NoSuchFileException) {
             status = Status.NOT_FOUND;
-        } else if (t instanceof UnsupportedSourceFormatException) {
+        } else if (t instanceof SourceFormatException) {
             status = Status.NOT_IMPLEMENTED;
         } else {
             status = Status.INTERNAL_SERVER_ERROR;
@@ -78,6 +79,8 @@ class ErrorResource extends AbstractResource {
     @Override
     public void doGET() throws Exception {
         final Status status = toStatus(error);
+        log(status.getCode());
+
         final Map<String,Object> templateVars = getCommonTemplateVars();
         templateVars.put("pageTitle", status.toString());
         templateVars.put("message", error.getMessage());
@@ -98,8 +101,7 @@ class ErrorResource extends AbstractResource {
 
         // Use a template that best fits the representation's content type.
         String template, mediaType;
-        if (Arrays.asList("text/html", "application/xhtml+xml").
-                contains(requestedType)) {
+        if (List.of("text/html", "application/xhtml+xml").contains(requestedType)) {
             template = "/error.html.vm";
             mediaType = "text/html";
         } else {
@@ -123,6 +125,24 @@ class ErrorResource extends AbstractResource {
         } catch (IOException e) {
             LOGGER.error("getStackTrace(): {}", e.getMessage(), e);
             return "Stack trace unavailable";
+        }
+    }
+
+    private void log(int statusCode) {
+        if (!Configuration.getInstance().getBoolean(Key.LOG_ERROR_RESPONSES, false)) {
+            return;
+        }
+        String message = "Responding with HTTP {} to {} {}: {}";
+        Object[] args = {
+                statusCode,
+                getRequest().getMethod(),
+                getRequest().getReference(),
+                error.getMessage(),
+                error };
+        if (statusCode >= 500) {
+            LOGGER.error(message, args);
+        } else if (statusCode != 404) {
+            LOGGER.warn(message, args);
         }
     }
 

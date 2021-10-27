@@ -34,14 +34,14 @@ public final class ImageInfoUtil {
      *                  maximum allowed number of pixels.
      */
     public static int minReductionFactor(final Dimension fullSize,
-                                         final int maxPixels) {
+                                         final long maxPixels) {
         if (maxPixels <= 0) {
             throw new IllegalArgumentException("maxPixels must be a positive number.");
         }
         int factor = 0;
         Dimension nextSize = new Dimension(fullSize);
 
-        while (nextSize.width() * nextSize.height() > maxPixels) {
+        while (nextSize.area() > maxPixels) {
             nextSize.scale(0.5);
             factor++;
         }

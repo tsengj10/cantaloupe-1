@@ -10,26 +10,24 @@ import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.resource.RequestContext;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.DelegateProxyService;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.test.AzureStorageTestUtil;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.ConfigurationConstants;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.security.InvalidKeyException;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.EnumSet;
+import java.util.NoSuchElementException;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests AzureStorageSource against Azure Storage. (Requires an Azure
@@ -39,13 +37,13 @@ public class AzureStorageSourceTest extends AbstractSourceTest {
 
     private AzureStorageSource instance;
 
-    @BeforeClass
+    @BeforeAll
     public static void beforeClass() throws Exception {
         BaseTest.beforeClass();
         AzureStorageTestUtil.uploadFixtures();
     }
 
-    @AfterClass
+    @AfterAll
     public static void afterClass() throws Exception {
         BaseTest.afterClass();
         AzureStorageTestUtil.deleteFixtures();
@@ -108,7 +106,7 @@ public class AzureStorageSourceTest extends AbstractSourceTest {
                 generateSAS());
     }
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         instance = newInstance();
@@ -116,12 +114,12 @@ public class AzureStorageSourceTest extends AbstractSourceTest {
 
     @Override
     void destroyEndpoint() {
-        // will be done in @AfterClass
+        // will be done in @AfterAll
     }
 
     @Override
     void initializeEndpoint() {
-        // will be done in @BeforeClass
+        // will be done in @BeforeAll
     }
 
     @Override
@@ -150,16 +148,11 @@ public class AzureStorageSourceTest extends AbstractSourceTest {
             Configuration config = Configuration.getInstance();
             config.setProperty(Key.AZURESTORAGESOURCE_LOOKUP_STRATEGY,
                     "ScriptLookupStrategy");
-            config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-            config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                    TestUtil.getFixture("delegates.rb").toString());
 
             Identifier identifier = new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_CONTENT_TYPE_AND_RECOGNIZED_EXTENSION);
-            RequestContext context = new RequestContext();
-            context.setIdentifier(identifier);
-            DelegateProxyService service = DelegateProxyService.getInstance();
-            DelegateProxy proxy = service.newDelegateProxy(context);
-            instance.setDelegateProxy(proxy);
+            DelegateProxy delegateProxy = TestUtil.newDelegateProxy();
+            delegateProxy.getRequestContext().setIdentifier(identifier);
+            instance.setDelegateProxy(delegateProxy);
         } catch (Exception e) {
             fail();
         }
@@ -168,131 +161,91 @@ public class AzureStorageSourceTest extends AbstractSourceTest {
     /* checkAccess() */
 
     @Test
-    public void testCheckAccessUsingBasicLookupStrategyWithPresentUnreadableImage() {
+    void testCheckAccessUsingBasicLookupStrategyWithPresentUnreadableImage() {
         // TODO: write this
     }
 
     @Test
-    public void testCheckAccessUsingScriptLookupStrategyWithPresentReadableImage()
+    void testCheckAccessUsingScriptLookupStrategyWithPresentReadableImage()
             throws Exception {
         useScriptLookupStrategy();
         instance.checkAccess();
     }
 
     @Test
-    public void testCheckAccessUsingScriptLookupStrategyWithPresentUnreadableImage() {
+    void testCheckAccessUsingScriptLookupStrategyWithPresentUnreadableImage() {
         useScriptLookupStrategy();
         // TODO: write this
     }
 
-    @Test(expected = NoSuchFileException.class)
-    public void testCheckAccessUsingScriptLookupStrategyWithMissingImage()
-            throws Exception {
+    @Test
+    void testCheckAccessUsingScriptLookupStrategyWithMissingImage() {
         useScriptLookupStrategy();
 
         Identifier identifier = new Identifier("bogus");
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
-        instance.setDelegateProxy(proxy);
+        DelegateProxy delegateProxy = TestUtil.newDelegateProxy();
+        delegateProxy.getRequestContext().setIdentifier(identifier);
+        instance.setDelegateProxy(delegateProxy);
         instance.setIdentifier(identifier);
 
-        instance.checkAccess();
+        assertThrows(NoSuchFileException.class, instance::checkAccess);
     }
 
     @Test
-    public void testCheckAccessWithSAS() throws Exception {
+    void testCheckAccessWithSAS() throws Exception {
         instance.setIdentifier(new Identifier(getSASURI()));
         clearConfig();
         instance.checkAccess();
     }
 
-    /* getFormat() */
+    /* getFormatIterator() */
 
     @Test
-    public void testGetSourceFormatUsingBasicLookupStrategy()
-            throws IOException {
-        assertEquals(Format.JPG, instance.getFormat());
+    void testGetFormatIteratorHasNext() {
+        AzureStorageSource source = newInstance();
+        source.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_CONTENT_TYPE_AND_RECOGNIZED_EXTENSION));
+
+        AzureStorageSource.FormatIterator<Format> it =
+                source.getFormatIterator();
+        assertTrue(it.hasNext());
+        it.next(); // object key
+        assertTrue(it.hasNext());
+        it.next(); // identifier extension
+        assertTrue(it.hasNext());
+        it.next(); // Content-Type is null
+        assertTrue(it.hasNext());
+        it.next(); // magic bytes
+        assertFalse(it.hasNext());
     }
 
     @Test
-    public void testGetSourceFormatUsingScriptLookupStrategy()
-            throws IOException {
-        useScriptLookupStrategy();
-        assertEquals(Format.JPG, instance.getFormat());
-    }
+    void testGetFormatIteratorNext() {
+        AzureStorageSource source = newInstance();
+        source.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_NO_CONTENT_TYPE_AND_INCORRECT_EXTENSION));
 
-    @Test
-    public void testGetSourceFormatWithContentTypeAndRecognizedExtensionInObjectKey()
-            throws IOException {
-        instance.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_CONTENT_TYPE_AND_RECOGNIZED_EXTENSION));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    @Test
-    public void testGetSourceFormatWithContentTypeAndUnrecognizedExtensionInObjectKey()
-            throws IOException {
-        instance.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_CONTENT_TYPE_AND_UNRECOGNIZED_EXTENSION));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    @Test
-    public void testGetSourceFormatWithContentTypeAndNoExtensionInObjectKey()
-            throws IOException {
-        instance.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_CONTENT_TYPE_BUT_NO_EXTENSION));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    @Test
-    public void testGetSourceFormatWithNoContentTypeButRecognizedExtensionInObjectKey()
-            throws IOException {
-        instance.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_NO_CONTENT_TYPE_AND_RECOGNIZED_EXTENSION));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    @Test
-    public void testGetSourceFormatWithNoContentTypeAndUnrecognizedExtensionInObjectKey()
-            throws IOException {
-        instance.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_NO_CONTENT_TYPE_AND_UNRECOGNIZED_EXTENSION));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    @Test
-    public void testGetSourceFormatWithNoContentTypeOrExtensionInObjectKey()
-            throws IOException {
-        instance.setIdentifier(new Identifier(AzureStorageTestUtil.OBJECT_KEY_WITH_NO_CONTENT_TYPE_OR_EXTENSION));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    @Test
-    public void testGetSourceFormatWithNonImage() throws IOException {
-        instance.setIdentifier(new Identifier(AzureStorageTestUtil.NON_IMAGE_KEY));
-        assertEquals(Format.UNKNOWN, instance.getFormat());
-    }
-
-    @Test
-    public void testGetSourceFormatWithSAS() throws Exception {
-        instance.setIdentifier(new Identifier(getSASURI()));
-        clearConfig();
-        instance.getFormat();
+        AzureStorageSource.FormatIterator<Format> it = source.getFormatIterator();
+        assertEquals(Format.get("png"), it.next());     // object key
+        assertEquals(Format.get("png"), it.next());     // identifier extension
+        assertEquals(Format.UNKNOWN, it.next()); // Content-Type is null
+        assertEquals(Format.get("jpg"), it.next());     // magic bytes
+        assertThrows(NoSuchElementException.class, it::next);
     }
 
     /* newStreamFactory() */
 
     @Test
-    public void testNewStreamFactoryUsingBasicLookupStrategy() throws Exception {
+    void testNewStreamFactoryUsingBasicLookupStrategy() throws Exception {
         instance.newStreamFactory();
     }
 
     @Test
-    public void testNewStreamFactoryUsingScriptLookupStrategy() throws Exception {
+    void testNewStreamFactoryUsingScriptLookupStrategy() throws Exception {
         useScriptLookupStrategy();
         assertNotNull(instance.newStreamFactory());
     }
 
     @Test
-    public void testNewStreamFactoryWithSAS() throws Exception {
+    void testNewStreamFactoryWithSAS() throws Exception {
         instance.setIdentifier(new Identifier(getSASURI()));
         clearConfig();
         instance.newStreamFactory();
@@ -301,16 +254,16 @@ public class AzureStorageSourceTest extends AbstractSourceTest {
     /* getBlobKey() */
 
     @Test
-    public void testGetBlobKey() throws Exception {
+    void testGetBlobKey() throws Exception {
         assertNotNull(instance.getBlobKey());
     }
     @Test
-    public void testGetBlobKeyBasicLookupStrategy() throws Exception {
+    void testGetBlobKeyBasicLookupStrategy() throws Exception {
         String result = instance.getBlobKey();
         assertEquals(AzureStorageTestUtil.OBJECT_KEY_WITH_CONTENT_TYPE_AND_RECOGNIZED_EXTENSION, result);
     }
     @Test
-    public void testGetObjectKeyDelegateLookupStrategy() throws Exception {
+    void testGetObjectKeyDelegateLookupStrategy() throws Exception {
         useScriptLookupStrategy();
         String result = instance.getBlobKey();
         assertEquals(AzureStorageTestUtil.OBJECT_KEY_WITH_CONTENT_TYPE_BUT_NO_EXTENSION, result);

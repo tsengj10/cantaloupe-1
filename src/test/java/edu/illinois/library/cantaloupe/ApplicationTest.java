@@ -3,19 +3,19 @@ package edu.illinois.library.cantaloupe;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ApplicationTest extends BaseTest {
 
     @Test
-    public void testGetTempPathSetInConfiguration() throws IOException {
+    void testGetTempPathSetInConfiguration() throws IOException {
         Path expectedDir = Files.createTempDirectory("test");
         Configuration.getInstance().setProperty(Key.TEMP_PATHNAME, expectedDir);
 
@@ -24,7 +24,7 @@ public class ApplicationTest extends BaseTest {
     }
 
     @Test
-    public void testGetTempPathFallsBackToDefault() {
+    void testGetTempPathFallsBackToDefault() {
         Path expectedDir = Paths.get(System.getProperty("java.io.tmpdir"));
         Configuration.getInstance().clearProperty(Key.TEMP_PATHNAME);
 
@@ -33,7 +33,7 @@ public class ApplicationTest extends BaseTest {
     }
 
     @Test
-    public void testGetTempPathCreatesDirectory() {
+    void testGetTempPathCreatesDirectory() {
         Path expectedDir = Paths.get(System.getProperty("java.io.tmpdir"),
                 "cats", "cats", "cats");
         Configuration.getInstance().setProperty(Key.TEMP_PATHNAME, expectedDir);
@@ -44,26 +44,11 @@ public class ApplicationTest extends BaseTest {
 
     /**
      * {@link Application#getVersion()} is not fully testable as it returns a
-     * different value when the app is running from a .war.
+     * different value when the app is running from a JAR.
      */
     @Test
-    public void testGetVersion() {
+    void testGetVersion() {
         assertEquals("Unknown", Application.getVersion());
-    }
-
-    @Test
-    public void testIsUsingSystemTempPath() {
-        System.setProperty("java.io.tmpdir", "/default");
-        final Configuration config = Configuration.getInstance();
-
-        config.clearProperty(Key.TEMP_PATHNAME);
-        assertTrue(Application.isUsingSystemTempPath());
-
-        config.setProperty(Key.TEMP_PATHNAME, "/default");
-        assertTrue(Application.isUsingSystemTempPath());
-
-        config.setProperty(Key.TEMP_PATHNAME, System.getProperty("user.dir"));
-        assertFalse(Application.isUsingSystemTempPath());
     }
 
 }

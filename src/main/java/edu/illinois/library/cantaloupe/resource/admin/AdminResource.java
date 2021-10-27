@@ -7,11 +7,12 @@ import edu.illinois.library.cantaloupe.http.Headers;
 import edu.illinois.library.cantaloupe.http.Method;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
+import edu.illinois.library.cantaloupe.image.MetaIdentifierTransformerFactory;
 import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.processor.InitializationException;
 import edu.illinois.library.cantaloupe.processor.Processor;
 import edu.illinois.library.cantaloupe.processor.ProcessorFactory;
-import edu.illinois.library.cantaloupe.processor.UnsupportedSourceFormatException;
+import edu.illinois.library.cantaloupe.processor.SourceFormatException;
 import edu.illinois.library.cantaloupe.resource.Route;
 import edu.illinois.library.cantaloupe.resource.VelocityRepresentation;
 import edu.illinois.library.cantaloupe.source.Source;
@@ -23,7 +24,6 @@ import java.awt.GraphicsEnvironment;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -56,19 +56,49 @@ public class AdminResource extends AbstractAdminResource {
     /**
      * N.B.: Velocity requires this class to be public.
      */
+    public static class FormatProxy extends ObjectProxy
+            implements Comparable<FormatProxy> {
+
+        FormatProxy(Format format) {
+            super(format);
+        }
+
+        @Override
+        public int compareTo(FormatProxy o) {
+            return ((Format) object).compareTo((Format) o.object);
+        }
+
+        @Override
+        public String getName() {
+            return ((Format) object).getName();
+        }
+
+        public boolean isImage() {
+            return !((Format) object).isVideo();
+        }
+
+        public boolean isVideo() {
+            return ((Format) object).isVideo();
+        }
+
+        @Override
+        public String toString() {
+            return object.toString();
+        }
+
+    }
+
+    /**
+     * N.B.: Velocity requires this class to be public.
+     */
     public static class ProcessorProxy extends ObjectProxy {
 
         ProcessorProxy(Processor proc) {
             super(proc);
         }
 
-        public boolean supports(Format format) {
-            try {
-                ((Processor) object).setSourceFormat(format);
-                return true;
-            } catch (UnsupportedSourceFormatException e) {
-                return false;
-            }
+        public boolean supports(FormatProxy format) {
+            return ((Processor) object).supportsSourceFormat((Format) format.object);
         }
 
         /**
@@ -129,27 +159,43 @@ public class AdminResource extends AbstractAdminResource {
         ////////////////////////////////////////////////////////////////////
         //////////////////////// status section ////////////////////////////
         ////////////////////////////////////////////////////////////////////
+        {
+            // VM info
+            RuntimeMXBean runtimeMxBean = ManagementFactory.getRuntimeMXBean();
+            vars.put("vmArguments", runtimeMxBean.getInputArguments());
+            vars.put("vmName", runtimeMxBean.getVmName());
+            vars.put("vmVendor", runtimeMxBean.getVmVendor());
+            vars.put("vmVersion", runtimeMxBean.getVmVersion());
+            vars.put("javaVersion", runtimeMxBean.getSpecVersion());
 
-        // VM info
-        RuntimeMXBean runtimeMxBean = ManagementFactory.getRuntimeMXBean();
-        vars.put("vmArguments", runtimeMxBean.getInputArguments());
-        vars.put("vmName", runtimeMxBean.getVmName());
-        vars.put("vmVendor", runtimeMxBean.getVmVendor());
-        vars.put("vmVersion", runtimeMxBean.getVmVersion());
-        vars.put("javaVersion", runtimeMxBean.getSpecVersion());
+            // Reverse-Proxy headers
+            final Headers headers = getRequest().getHeaders();
+            vars.put("xForwardedProtoHeader",
+                    headers.getFirstValue("X-Forwarded-Proto", ""));
+            vars.put("xForwardedHostHeader",
+                    headers.getFirstValue("X-Forwarded-Host", ""));
+            vars.put("xForwardedPortHeader",
+                    headers.getFirstValue("X-Forwarded-Port", ""));
+            vars.put("xForwardedPathHeader",
+                    headers.getFirstValue("X-Forwarded-Path", ""));
+            vars.put("xForwardedForHeader",
+                    headers.getFirstValue("X-Forwarded-For", ""));
+        }
 
-        // Reverse-Proxy headers
-        final Headers headers = getRequest().getHeaders();
-        vars.put("xForwardedProtoHeader",
-                headers.getFirstValue("X-Forwarded-Proto", ""));
-        vars.put("xForwardedHostHeader",
-                headers.getFirstValue("X-Forwarded-Host", ""));
-        vars.put("xForwardedPortHeader",
-                headers.getFirstValue("X-Forwarded-Port", ""));
-        vars.put("xForwardedPathHeader",
-                headers.getFirstValue("X-Forwarded-Path", ""));
-        vars.put("xForwardedForHeader",
-                headers.getFirstValue("X-Forwarded-For", ""));
+        ////////////////////////////////////////////////////////////////////
+        /////////////////////// endpoints section //////////////////////////
+        ////////////////////////////////////////////////////////////////////
+        {
+            vars.put("currentMetaIdentifierTransformer",
+                    new MetaIdentifierTransformerFactory()
+                            .newInstance(getDelegateProxy())
+                            .getClass().getSimpleName());
+            List<String> impls = MetaIdentifierTransformerFactory.allImplementations()
+                    .stream()
+                    .map(Class::getSimpleName)
+                    .collect(Collectors.toList());
+            vars.put("metaIdentifierTransformers", impls);
+        }
 
         ////////////////////////////////////////////////////////////////////
         //////////////////////// sources section ///////////////////////////
@@ -186,11 +232,11 @@ public class AdminResource extends AbstractAdminResource {
                 new ProcessorFactory().getSelectionStrategy());
 
         // source format assignments
-        Map<Format,ProcessorProxy> assignments = new TreeMap<>();
-        for (Format format : Format.values()) {
+        Map<FormatProxy, ProcessorProxy> assignments = new TreeMap<>();
+        for (Format format : Format.all()) {
             try (Processor proc = new ProcessorFactory().newProcessor(format)) {
-                assignments.put(format, new ProcessorProxy(proc));
-            } catch (UnsupportedSourceFormatException |
+                assignments.put(new FormatProxy(format), new ProcessorProxy(proc));
+            } catch (SourceFormatException |
                     InitializationException |
                     ReflectiveOperationException e) {
                 // nothing we can do
@@ -199,31 +245,39 @@ public class AdminResource extends AbstractAdminResource {
         vars.put("processorAssignments", assignments);
 
         // image source formats
-        List<Format> imageFormats = Arrays.stream(Format.values()).
-                filter(f -> Format.Type.IMAGE.equals(f.getType()) && !Format.DCM.equals(f)).
-                sorted(Comparator.comparing(Format::getName)).
-                collect(Collectors.toList());
+        List<FormatProxy> imageFormats = Format.all()
+                .stream()
+                .filter(f -> !f.isVideo())
+                .sorted(Comparator.comparing(Format::getName))
+                .map(FormatProxy::new)
+                .collect(Collectors.toUnmodifiableList());
         vars.put("imageSourceFormats", imageFormats);
 
         // video source formats
-        List<Format> videoFormats = Arrays.stream(Format.values()).
-                filter(f -> Format.Type.VIDEO.equals(f.getType())).
-                sorted(Comparator.comparing(Format::getName)).
-                collect(Collectors.toList());
+        List<FormatProxy> videoFormats = Format.all()
+                .stream()
+                .filter(Format::isVideo)
+                .sorted(Comparator.comparing(Format::getName))
+                .map(FormatProxy::new)
+                .collect(Collectors.toUnmodifiableList());
         vars.put("videoSourceFormats", videoFormats);
 
         // source format assignments
-        vars.put("sourceFormats", Format.values());
+        vars.put("sourceFormats", Format.all()
+                .stream()
+                .map(FormatProxy::new)
+                .collect(Collectors.toUnmodifiableList()));
 
         List<ProcessorProxy> sortedProcessorProxies =
                 ProcessorFactory.getAllProcessors().stream().
                         map(ProcessorProxy::new).
                         sorted(Comparator.comparing(ObjectProxy::getName)).
-                        collect(Collectors.toList());
+                        collect(Collectors.toUnmodifiableList());
 
         // warnings
-        vars.put("anyWarnings", sortedProcessorProxies.stream().
-                anyMatch(p -> !p.getWarnings().isEmpty()));
+        vars.put("anyWarnings", sortedProcessorProxies
+                .stream()
+                .anyMatch(p -> !p.getWarnings().isEmpty()));
 
         vars.put("processors", sortedProcessorProxies);
 
@@ -233,43 +287,47 @@ public class AdminResource extends AbstractAdminResource {
         ////////////////////////////////////////////////////////////////////
         //////////////////////// caches section ////////////////////////////
         ////////////////////////////////////////////////////////////////////
+        {
+            // source caches
+            try {
+                CacheFactory.getSourceCache().ifPresent(sc ->
+                        vars.put("currentSourceCache", sc));
+            } catch (Exception e) {
+                // noop
+            }
 
-        // source caches
-        try {
-            vars.put("currentSourceCache", CacheFactory.getSourceCache());
-        } catch (Exception e) {
-            // noop
+            sortedProxies = CacheFactory.getAllSourceCaches()
+                    .stream()
+                    .map(ObjectProxy::new)
+                    .sorted(Comparator.comparing(ObjectProxy::getName))
+                    .collect(Collectors.toList());
+            vars.put("sourceCaches", sortedProxies);
+
+            // derivative caches
+            try {
+                vars.put("currentDerivativeCache",
+                        CacheFactory.getDerivativeCache());
+            } catch (Exception e) {
+                // noop
+            }
+
+            sortedProxies = CacheFactory.getAllDerivativeCaches()
+                    .stream()
+                    .map(ObjectProxy::new)
+                    .sorted(Comparator.comparing(ObjectProxy::getName))
+                    .collect(Collectors.toList());
+            vars.put("derivativeCaches", sortedProxies);
         }
-
-        sortedProxies = CacheFactory.getAllSourceCaches().stream().
-                map(ObjectProxy::new).
-                sorted(Comparator.comparing(ObjectProxy::getName)).
-                collect(Collectors.toList());
-        vars.put("sourceCaches", sortedProxies);
-
-        // derivative caches
-        try {
-            vars.put("currentDerivativeCache",
-                    CacheFactory.getDerivativeCache());
-        } catch (Exception e) {
-            // noop
-        }
-
-        sortedProxies = CacheFactory.getAllDerivativeCaches().stream().
-                map(ObjectProxy::new).
-                sorted(Comparator.comparing(ObjectProxy::getName)).
-                collect(Collectors.toList());
-        vars.put("derivativeCaches", sortedProxies);
 
         ////////////////////////////////////////////////////////////////////
         /////////////////////// overlays section ///////////////////////////
         ////////////////////////////////////////////////////////////////////
-
-        vars.put("fonts", GraphicsEnvironment.getLocalGraphicsEnvironment().
-                getAvailableFontFamilyNames());
-        vars.put("currentOverlayFont", Configuration.getInstance().
-                getString(Key.OVERLAY_STRING_FONT, ""));
-
+        {
+            vars.put("fonts", GraphicsEnvironment.getLocalGraphicsEnvironment().
+                    getAvailableFontFamilyNames());
+            vars.put("currentOverlayFont", Configuration.getInstance().
+                    getString(Key.OVERLAY_STRING_FONT, ""));
+        }
         return vars;
     }
 

@@ -8,8 +8,6 @@ import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.operation.ColorTransform;
 import edu.illinois.library.cantaloupe.operation.Crop;
 import edu.illinois.library.cantaloupe.operation.CropByPercent;
-import edu.illinois.library.cantaloupe.operation.Encode;
-import edu.illinois.library.cantaloupe.operation.MetadataCopy;
 import edu.illinois.library.cantaloupe.operation.Operation;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
@@ -20,18 +18,13 @@ import edu.illinois.library.cantaloupe.operation.Transpose;
 import edu.illinois.library.cantaloupe.operation.overlay.Overlay;
 import edu.illinois.library.cantaloupe.operation.redaction.Redaction;
 import edu.illinois.library.cantaloupe.processor.codec.BufferedImageSequence;
-import edu.illinois.library.cantaloupe.processor.codec.ImageWriter;
-import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
 import edu.illinois.library.cantaloupe.processor.codec.ReaderHint;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -57,85 +50,120 @@ final class Java2DPostProcessor {
     private static final Logger LOGGER =
             LoggerFactory.getLogger(Java2DPostProcessor.class);
 
-    static final Set<ProcessorFeature> SUPPORTED_FEATURES =
-            Collections.unmodifiableSet(EnumSet.of(
-                    ProcessorFeature.MIRRORING,
-                    ProcessorFeature.REGION_BY_PERCENT,
-                    ProcessorFeature.REGION_BY_PIXELS,
-                    ProcessorFeature.REGION_SQUARE,
-                    ProcessorFeature.ROTATION_ARBITRARY,
-                    ProcessorFeature.ROTATION_BY_90S,
-                    ProcessorFeature.SIZE_ABOVE_FULL,
-                    ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_HEIGHT,
-                    ProcessorFeature.SIZE_BY_PERCENT,
-                    ProcessorFeature.SIZE_BY_WIDTH,
-                    ProcessorFeature.SIZE_BY_WIDTH_HEIGHT));
-    static final Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-            SUPPORTED_IIIF_1_QUALITIES = Collections.unmodifiableSet(EnumSet.of(
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.BITONAL,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.COLOR,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.GREY,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.NATIVE));
-    static final Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-            SUPPORTED_IIIF_2_QUALITIES = Collections.unmodifiableSet(EnumSet.of(
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.BITONAL,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.COLOR,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.DEFAULT,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.GRAY));
-
     /**
-     * Convenience method. Can be used for all images but not {@link
-     * BufferedImageSequence image sequences}; for those, use {@link
-     * #postProcess(BufferedImageSequence, OperationList, Info, Metadata,
-     * OutputStream)}.
+     * Can be used for all images but not {@link BufferedImageSequence image
+     * sequences}; for those, use {@link #postProcess(BufferedImageSequence,
+     * OperationList, Info)}.
      *
      * @param image           Image to process.
      * @param readerHints     Hints from the image reader. May be
      *                        {@literal null}.
      * @param opList          Operations to apply to the image.
-     * @param imageInfo       Information about the source image.
+     * @param info            Information about the source image.
      * @param reductionFactor May be {@literal null}.
-     * @param metadata        Metadata to embed in the resulting image.
-     * @param outputStream    Output stream to write the resulting image to.
      */
-    static void postProcess(BufferedImage image,
-                            final Set<ReaderHint> readerHints,
-                            final OperationList opList,
-                            final Info imageInfo,
-                            final ReductionFactor reductionFactor,
-                            final Metadata metadata,
-                            final OutputStream outputStream) throws IOException {
-        image = doPostProcess(image, readerHints, opList, imageInfo,
-                reductionFactor);
-
-        ImageWriter writer = new ImageWriterFactory()
-                .newImageWriter((Encode) opList.getFirst(Encode.class));
-        if (opList.getFirst(MetadataCopy.class) != null) {
-            writer.setMetadata(metadata);
+    static BufferedImage postProcess(BufferedImage image,
+                                     Set<ReaderHint> readerHints,
+                                     OperationList opList,
+                                     Info info,
+                                     ReductionFactor reductionFactor) {
+        if (reductionFactor == null) {
+            reductionFactor = new ReductionFactor();
         }
-        writer.write(image, outputStream);
+        if (readerHints == null) {
+            readerHints = EnumSet.noneOf(ReaderHint.class);
+        }
+
+        image = Java2DUtil.reduceTo8Bits(image);
+
+        final Dimension fullSize = info.getSize();
+
+        // N.B.: Any Crop or Rotate operations present in the operation list
+        // have already been corrected for this orientation, but we also need
+        // to account for operation lists that don't include one or both of
+        // those.
+        Orientation orientation = Orientation.ROTATE_0;
+        if (!readerHints.contains(ReaderHint.ALREADY_ORIENTED)) {
+            final Metadata metadata = info.getMetadata();
+            if (metadata != null) {
+                orientation = metadata.getOrientation();
+            }
+        }
+
+        // Apply the crop operation, if present, and retain a reference
+        // to it for subsequent operations to refer to.
+        Crop crop = new CropByPercent();
+        for (Operation op : opList) {
+            if (op instanceof Crop) {
+                crop = (Crop) op;
+                if (crop.hasEffect(fullSize, opList) &&
+                        !readerHints.contains(ReaderHint.ALREADY_CROPPED)) {
+                    image = Java2DUtil.crop(image, crop, reductionFactor,
+                            opList.getScaleConstraint(), false);
+                }
+            }
+        }
+
+        if (!readerHints.contains(ReaderHint.ALREADY_ORIENTED) &&
+                !Orientation.ROTATE_0.equals(orientation)) {
+            image = Java2DUtil.rotate(image, orientation);
+        }
+
+        // Apply redactions.
+        final Set<Redaction> redactions = opList.stream()
+                .filter(op -> op instanceof Redaction &&
+                        op.hasEffect(fullSize, opList))
+                .map(op -> (Redaction) op)
+                .collect(Collectors.toSet());
+        Java2DUtil.applyRedactions(image, fullSize, crop,
+                new double[] { 1.0, 1.0 }, reductionFactor,
+                opList.getScaleConstraint(), redactions);
+
+        // Apply remaining operations.
+        for (Operation op : opList) {
+            if (!op.hasEffect(fullSize, opList)) {
+                continue;
+            }
+            if (op instanceof Scale) {
+                final Scale scale = (Scale) op;
+                final boolean isLinear = scale.isLinear() &&
+                        !scale.isUp(fullSize, opList.getScaleConstraint());
+                if (isLinear) {
+                    image = Java2DUtil.convertColorToLinearRGB(image);
+                }
+                image = Java2DUtil.scale(image, scale,
+                        opList.getScaleConstraint(), reductionFactor, isLinear);
+                if (isLinear) {
+                    image = Java2DUtil.convertColorToSRGB(image);
+                }
+            } else if (op instanceof Transpose) {
+                image = Java2DUtil.transpose(image, (Transpose) op);
+            } else if (op instanceof Rotate) {
+                image = Java2DUtil.rotate(image, (Rotate) op);
+            } else if (op instanceof ColorTransform) {
+                image = Java2DUtil.transformColor(image, (ColorTransform) op);
+            } else if (op instanceof Sharpen) {
+                image = Java2DUtil.sharpen(image, (Sharpen) op);
+            } else if (op instanceof Overlay) {
+                Java2DUtil.applyOverlay(image, (Overlay) op);
+            }
+        }
+        return image;
     }
 
     /**
-     * Variant for processing {@link BufferedImageSequence image sequences},
-     * such as to support animated GIFs.
+     * For processing {@link BufferedImageSequence image sequences}, such as to
+     * support animated GIFs.
      *
-     * @param sequence     Sequence containing one or more images, which will
-     *                     be replaced with the post-processed versions.
-     * @param opList       Operations to apply to each image in the sequence.
-     * @param info         Information about the source image.
-     * @param metadata     Metadata to embed in the resulting image.
-     * @param outputStream Stream to write the resulting image to.
+     * @param sequence Sequence containing one or more images, which will be
+     *                 replaced with the post-processed variants.
+     * @param opList   Operations to apply to each image in the sequence.
+     * @param info     Information about the source image.
      * @throws IllegalArgumentException if the sequence is empty.
      */
     static void postProcess(final BufferedImageSequence sequence,
                             final OperationList opList,
-                            final Info info,
-                            final Metadata metadata,
-                            final OutputStream outputStream) throws IOException {
+                            final Info info) throws IOException {
         final int numFrames = sequence.length();
 
         // 1. If the sequence contains no frames, throw an exception.
@@ -147,7 +175,7 @@ final class Java2DPostProcessor {
             throw new IllegalArgumentException("Empty sequence");
         } else if (numFrames == 1) {
             BufferedImage image = sequence.get(0);
-            image = processFrame(image, opList, info);
+            image = postProcess(image, null, opList, info, null);
             sequence.set(0, image);
         } else {
             final int numThreads = Math.min(
@@ -156,7 +184,7 @@ final class Java2DPostProcessor {
                     (int) Math.ceil(numFrames / (float) numThreads);
             final CountDownLatch latch = new CountDownLatch(numFrames);
 
-            LOGGER.debug("Processing {} frames in {} threads ({} frames per thread)",
+            LOGGER.debug("Processing {} frames in {} threads ({} frames/thread)",
                     numFrames, numThreads, framesPerThread);
 
             // Create a list containing numThreads queues. Each map will
@@ -189,7 +217,7 @@ final class Java2DPostProcessor {
                         LOGGER.trace("Thread {}: processing frame {} (latch count: {})",
                                 queueNum, frameNum, latch.getCount());
                         BufferedImage image = (BufferedImage) dict.get("image");
-                        image = processFrame(image, opList, info);
+                        image = postProcess(image, null, opList, info, null);
                         sequence.set(frameNum, image);
                         latch.countDown();
                     }
@@ -205,99 +233,6 @@ final class Java2DPostProcessor {
                 throw new IOException(e);
             }
         }
-
-        ImageWriter writer = new ImageWriterFactory()
-                .newImageWriter((Encode) opList.getFirst(Encode.class));
-        if (opList.getFirst(MetadataCopy.class) != null) {
-            writer.setMetadata(metadata);
-        }
-        writer.write(sequence, outputStream);
-    }
-
-    private static BufferedImage processFrame(BufferedImage image,
-                                              OperationList opList,
-                                              Info imageInfo) {
-        return doPostProcess(image, null, opList, imageInfo, null);
-    }
-
-    private static BufferedImage doPostProcess(BufferedImage image,
-                                               Set<ReaderHint> readerHints,
-                                               final OperationList opList,
-                                               final Info imageInfo,
-                                               ReductionFactor reductionFactor) {
-        if (reductionFactor == null) {
-            reductionFactor = new ReductionFactor();
-        }
-        if (readerHints == null) {
-            readerHints = EnumSet.noneOf(ReaderHint.class);
-        }
-
-        image = Java2DUtil.reduceTo8Bits(image);
-
-        final Dimension fullSize = imageInfo.getSize();
-
-        // N.B.: Any Crop or Rotate operations present in the operation list
-        // have already been corrected for this orientation, but we also need
-        // to account for operation lists that don't include one or both of
-        // those.
-        final Orientation orientation = imageInfo.getOrientation();
-
-        if (!Orientation.ROTATE_0.equals(orientation) &&
-                opList.getFirst(Crop.class) == null) {
-            image = Java2DUtil.rotate(image, orientation);
-        }
-
-        // Apply the crop operation, if present, and retain a reference
-        // to it for subsequent operations to refer to.
-        Crop crop = new CropByPercent();
-        for (Operation op : opList) {
-            if (op instanceof Crop) {
-                crop = (Crop) op;
-                if (crop.hasEffect(fullSize, opList) &&
-                        !readerHints.contains(ReaderHint.ALREADY_CROPPED)) {
-                    image = Java2DUtil.crop(image, crop, reductionFactor,
-                            opList.getScaleConstraint());
-                }
-            }
-        }
-
-        // Redactions happen immediately after cropping.
-        final Set<Redaction> redactions = opList.stream()
-                .filter(op -> op instanceof Redaction)
-                .filter(op -> op.hasEffect(fullSize, opList))
-                .map(op -> (Redaction) op)
-                .collect(Collectors.toSet());
-        Java2DUtil.applyRedactions(image, fullSize, crop,
-                new double[] { 1.0, 1.0 }, reductionFactor,
-                opList.getScaleConstraint(), redactions);
-
-        if (!Orientation.ROTATE_0.equals(orientation) &&
-                opList.getFirst(Crop.class) != null &&
-                opList.getFirst(Rotate.class) == null) {
-            image = Java2DUtil.rotate(image, orientation);
-        }
-
-        // Apply remaining operations.
-        for (Operation op : opList) {
-            if (op.hasEffect(fullSize, opList)) {
-                if (op instanceof Scale) {
-                    image = Java2DUtil.scale(image, (Scale) op,
-                            opList.getScaleConstraint(), reductionFactor);
-                } else if (op instanceof Transpose) {
-                    image = Java2DUtil.transpose(image, (Transpose) op);
-                } else if (op instanceof Rotate) {
-                    image = Java2DUtil.rotate(image, (Rotate) op);
-                } else if (op instanceof ColorTransform) {
-                    image = Java2DUtil.transformColor(image, (ColorTransform) op);
-                } else if (op instanceof Sharpen) {
-                    image = Java2DUtil.sharpen(image, (Sharpen) op);
-                } else if (op instanceof Overlay) {
-                    Java2DUtil.applyOverlay(image, (Overlay) op);
-                }
-            }
-        }
-
-        return image;
     }
 
     private Java2DPostProcessor() {}

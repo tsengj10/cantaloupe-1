@@ -1,20 +1,27 @@
 package edu.illinois.library.cantaloupe.http;
 
 import edu.illinois.library.cantaloupe.util.StringUtils;
+import okhttp3.HttpUrl;
 
-import java.io.UnsupportedEncodingException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * <p>Mutable URI class inspired by the one in Restlet.</p>
+ * <p>Mutable URI class.</p>
  *
- * <p>Unlike {@link java.net.URL} and {@link java.net.URI}, this class does not
- * throw {@link java.net.MalformedURLException}s or {@link URISyntaxException}s,
- * which are unfortunately checked, making these classes a pain to use.</p>
+ * <p>Components are stored unencoded in order to enable assembly of a
+ * partially or fully encoded URI string via one of the {@link #toString()}
+ * overloads.</p>
+ *
+ * <p>Also, unlike {@link java.net.URL} and {@link java.net.URI}, no checked
+ * exceptions are thrown, making it less of a pain to use.</p>
+ *
+ * @see <a href="https://tools.ietf.org/html/rfc3986">RFC 3986: Uniform
+ * Resource Identifier</a>
  */
 public final class Reference {
 
@@ -23,11 +30,11 @@ public final class Reference {
     private Query query = new Query();
 
     public static String decode(String encoded) {
-        try {
-            return URLDecoder.decode(encoded, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            throw new RuntimeException(e);
-        }
+        return URLDecoder.decode(encoded, StandardCharsets.UTF_8);
+    }
+
+    public static String encode(String decoded) {
+        return URLEncoder.encode(decoded, StandardCharsets.UTF_8);
     }
 
     public Reference() {}
@@ -50,25 +57,17 @@ public final class Reference {
      * @throws IllegalArgumentException if the argument is not a valid URI.
      */
     public Reference(String reference) {
-        try {
-            URI uri = new URI(reference);
-            String userInfo = uri.getRawUserInfo();
-            if (userInfo != null) {
-                String[] parts = userInfo.split(":");
-                setUser(parts[0]);
-                setSecret(parts[1]);
-            }
-            setScheme(uri.getScheme());
-            setHost(uri.getHost());
-            setPort(uri.getPort());
-            setPath(uri.getRawPath());
-            if (uri.getRawQuery() != null) {
-                setQuery(new Query(uri.getRawQuery()));
-            }
-            setFragment(uri.getRawFragment());
-        } catch (URISyntaxException e) {
-            throw new IllegalArgumentException(e);
+        HttpUrl url = HttpUrl.get(reference);
+        setUser(url.username());
+        setSecret(url.password());
+        setScheme(url.scheme());
+        setHost(url.host());
+        setPort(url.port());
+        setPath(url.encodedPath());
+        if (url.query() != null) {
+            setQuery(new Query(url.query()));
         }
+        setFragment(url.fragment());
     }
 
     public Reference(URI uri) {
@@ -159,6 +158,28 @@ public final class Reference {
             return obj.toString().equals(toString());
         }
         return super.equals(obj);
+    }
+
+    /**
+     * @return Authority (userinfo + host + port). If the port is the
+     *         standard port for the scheme, it is omitted.
+     */
+    public String getAuthority() {
+        final StringBuilder builder = new StringBuilder();
+        if (getUser() != null && !getUser().isBlank() &&
+                getSecret() != null && !getSecret().isBlank()) {
+            builder.append(encode(getUser()));
+            builder.append(":");
+            builder.append(encode(getSecret()));
+            builder.append("@");
+        }
+        builder.append(getHost());
+        if (("http".equalsIgnoreCase(getScheme()) && getPort() > 0 && getPort() != 80) ||
+                ("https".equalsIgnoreCase(getScheme()) && getPort() > 0 && getPort() != 443)) {
+            builder.append(":");
+            builder.append(getPort());
+        }
+        return builder.toString();
     }
 
     public String getFragment() {
@@ -266,10 +287,11 @@ public final class Reference {
 
     /**
      * @param query Cannot be {@code null}.
+     * @throws IllegalArgumentException if the argument is {@code null}.
      */
     public void setQuery(Query query) {
         if (query == null) {
-            throw new NullPointerException("Argument cannot be null");
+            throw new IllegalArgumentException("Argument cannot be null");
         }
         this.query = query;
     }
@@ -290,33 +312,28 @@ public final class Reference {
         this.user = user;
     }
 
-    public URI toURI() {
-        try {
-            return new URI(toString());
-        } catch (URISyntaxException e) {
-            throw new IllegalArgumentException(e);
-        }
-    }
-
+    /**
+     * @return URI string with all components encoded.
+     */
     @Override
     public String toString() {
+        return toString(false);
+    }
+
+    /**
+     * Overload which encodes all parts of the URI except the path, which is
+     * presumed to already be encoded.
+     */
+    public String toString(boolean encodePath) {
         StringBuilder builder = new StringBuilder();
         builder.append(getScheme());
         builder.append("://");
-        if (getUser() != null && !getUser().isEmpty() &&
-                getSecret() != null && !getSecret().isEmpty()) {
-            builder.append(getUser());
-            builder.append(":");
-            builder.append(getSecret());
-            builder.append("@");
+        builder.append(getAuthority());
+        if (encodePath) {
+            builder.append(encode(getPath()));
+        } else {
+            builder.append(getPath());
         }
-        builder.append(getHost());
-        if (("http".equalsIgnoreCase(getScheme()) && getPort() > 0 && getPort() != 80) ||
-                ("https".equalsIgnoreCase(getScheme()) && getPort() > 0 && getPort() != 443)) {
-            builder.append(":");
-            builder.append(getPort());
-        }
-        builder.append(getPath());
         if (!getQuery().isEmpty()) {
             builder.append("?");
             builder.append(getQuery().toString());

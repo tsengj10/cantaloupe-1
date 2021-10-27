@@ -1,37 +1,56 @@
 package edu.illinois.library.cantaloupe.resource;
 
-import edu.illinois.library.cantaloupe.cache.CacheFacade;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxyService;
+import edu.illinois.library.cantaloupe.http.Status;
 import edu.illinois.library.cantaloupe.image.Dimension;
-import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.http.Reference;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.Scale;
-import edu.illinois.library.cantaloupe.processor.Processor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import edu.illinois.library.cantaloupe.util.TimeUtils;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.Future;
+import java.util.Set;
 
 public abstract class PublicResource extends AbstractResource {
 
-    private static final Logger LOGGER =
-            LoggerFactory.getLogger(PublicResource.class);
-
-    protected Future<Path> tempFileFuture;
+    /**
+     * URL argument values that can be used with the {@code cache} query key to
+     * bypass all caching.
+     */
+    private static final Set<String> CACHE_BYPASS_ARGUMENTS =
+            Set.of("false", "nocache");
+    private static final String PAGE_NUMBER_QUERY_ARG = "page";
+    private static final String TIME_QUERY_ARG        = "time";
 
     @Override
     public void doInit() throws Exception {
         super.doInit();
-
+        if (DelegateProxyService.isDelegateAvailable()) {
+            RequestContext context = getRequestContext();
+            context.setLocalURI(getRequest().getReference());
+            context.setRequestURI(getPublicReference());
+            context.setRequestHeaders(getRequest().getHeaders().toMap());
+            context.setClientIP(getCanonicalClientIPAddress());
+            context.setCookies(getRequest().getCookies().toMap());
+            MetaIdentifier metaID = getMetaIdentifier();
+            if (metaID != null) {
+                context.setIdentifier(metaID.getIdentifier());
+                context.setPageNumber(metaID.getPageNumber());
+                ScaleConstraint scaleConstraint = metaID.getScaleConstraint();
+                if (scaleConstraint == null) {
+                    // Delegate users will appreciate not having to check for
+                    // null.
+                    scaleConstraint = new ScaleConstraint(1, 1);
+                }
+                context.setScaleConstraint(scaleConstraint);
+            }
+        }
         addHeaders();
     }
 
@@ -39,7 +58,6 @@ public abstract class PublicResource extends AbstractResource {
         getResponse().setHeader("Access-Control-Allow-Origin", "*");
         getResponse().setHeader("Vary",
                 "Accept, Accept-Charset, Accept-Encoding, Accept-Language, Origin");
-
         if (!isBypassingCache()) {
             final Configuration config = Configuration.getInstance();
             if (config.getBoolean(Key.CLIENT_CACHE_ENABLED, false)) {
@@ -78,139 +96,169 @@ public abstract class PublicResource extends AbstractResource {
         }
     }
 
-    @Override
-    public void destroy() {
-        // If a temp file was created in the source of fulfilling the request,
-        // it will need to be deleted.
-        if (tempFileFuture != null) {
-            try {
-                Path tempFile = tempFileFuture.get();
-                if (tempFile != null) {
-                    Files.deleteIfExists(tempFile);
-                }
-            } catch (Exception e) {
-                LOGGER.error("destroy(): {}", e.getMessage(), e);
-            }
-        }
-    }
-
     /**
-     * <p>Returns the info for the source image corresponding to the
-     * given identifier as efficiently as possible.</p>
-     *
-     * @param identifier Image identifier.
-     * @param proc       Processor from which to read the info if it can't be
-     *                   retrieved from a cache.
-     * @return           Info for the image with the given identifier.
+     * @return User agent's IP address, respecting the {@code X-Forwarded-For}
+     *         request header, if present.
      */
-    protected final Info getOrReadInfo(final Identifier identifier,
-                                       final Processor proc) throws IOException {
-        Info info;
-        if (!isBypassingCache()) {
-            info = new CacheFacade().getOrReadInfo(identifier, proc);
-            info.setIdentifier(identifier);
+    private String getCanonicalClientIPAddress() {
+        // The value is expected to be in the format: "client, proxy1, proxy2"
+        final String forwardedFor =
+                getRequest().getHeaders().getFirstValue("X-Forwarded-For", "");
+        if (!forwardedFor.isEmpty()) {
+            return forwardedFor.split(",")[0].trim();
         } else {
-            LOGGER.debug("getOrReadInfo(): bypassing the cache, as requested");
-            info = proc.readInfo();
-            info.setIdentifier(identifier);
+            // Fall back to the client IP address.
+            return getRequest().getRemoteAddr();
         }
-        return info;
     }
 
     /**
-     * @return Page index (a.k.a. page number - 1) from the {@literal page}
-     *         query argument, or {@literal 0} if not supplied.
+     * <p>Returns the page index (i.e. {@literal page number - 1}), which may
+     * come from one of two sources, in order of preference:</p>
+     *
+     * <ol>
+     *     <li>The {@link AbstractResource#getMetaIdentifier()
+     *     meta-identifier}</li>
+     *     <li>The {@link #PAGE_NUMBER_QUERY_ARG page number query argument
+     *     (deprecated in 5.0)</li>
+     * </ol>
+     *
+     * <p>If neither of those contain a page number, {@code 0} is returned.</p>
+     *
+     * @return Page index.
      */
     protected int getPageIndex() {
-        String arg = getRequest().getReference().getQuery()
-                .getFirstValue("page", "1");
-        try {
-            int index = Integer.parseInt(arg) - 1;
-            if (index >= 0) {
-                return index;
-            }
-        } catch (NumberFormatException ignore) {
+        // Check the meta-identifier.
+        int index = 0;
+        if (getMetaIdentifier().getPageNumber() != null) {
+            index = getMetaIdentifier().getPageNumber() - 1;
         }
-        return 0;
+        if (index == 0) {
+            // Check the `page` query argument (deprecated in 5.0).
+            String arg = getRequest().getReference().getQuery()
+                    .getFirstValue(PAGE_NUMBER_QUERY_ARG, "1");
+            try {
+                index = Integer.parseInt(arg) - 1;
+                if (index < 0) {
+                    index = 0;
+                }
+            } catch (NumberFormatException ignore) {
+                // Client supplied a bogus page number, so use 0.
+            }
+            if (index == 0) {
+                // Check the `time` query argument (deprecated in 5.0).
+                arg = getRequest().getReference().getQuery()
+                        .getFirstValue(TIME_QUERY_ARG, "00:00:00");
+                try {
+                    index = TimeUtils.toSeconds(arg);
+                } catch (IllegalArgumentException ignore) {
+                    // Client supplied a bogus time, so use 0.
+                }
+            }
+        }
+        return index;
     }
 
     /**
-     * @return Whether there is a {@literal cache} argument set to {@literal
-     *         false} in the URI query string.
+     * @return Whether there is a {@code cache} argument set to {@code false}
+     *         or {@code nocache} in the URI query string indicating that cache
+     *         reads and writes are both bypassed.
      */
     protected final boolean isBypassingCache() {
-        return "false".equals(getRequest().getReference().getQuery()
-                .getFirstValue("cache"));
+        String value = getRequest().getReference().getQuery().getFirstValue("cache");
+        return (value != null) && CACHE_BYPASS_ARGUMENTS.contains(value);
+    }
+
+    /**
+     * @return Whether there is a {@code cache} argument set to {@code recache}
+     *         in the URI query string indicating that cache reads are
+     *         bypassed.
+     */
+    protected final boolean isBypassingCacheRead() {
+        String value = getRequest().getReference().getQuery().getFirstValue("cache");
+        return "recache".equals(value);
     }
 
     /**
      * <p>If an identifier is present in the URI, and it contains a scale
-     * constraint suffix in a non-normalized form, this method will redirect to
+     * constraint suffix in a non-normalized form, this method redirects to
      * a normalized URI.</p>
      *
      * <p>Examples:</p>
      *
      * <dl>
      *     <dt>1:2</dt>
-     *     <dd>no redirect</dd>
+     *     <dd>No redirect</dd>
      *     <dt>2:4</dt>
-     *     <dd>redirect to 1:2</dd>
+     *     <dd>Redirect to 1:2</dd>
      *     <dt>1:1 and 5:5</dt>
-     *     <dd>redirect to no constraint</dd>
+     *     <dd>Redirect to no constraint</dd>
      * </dl>
      *
-     * @return {@literal true} if redirecting. Clients should stop processing
-     *         if this is the case.
+     * @return {@code true} if redirecting. Clients should stop processing if
+     *         this is the case.
      */
     protected final boolean redirectToNormalizedScaleConstraint()
             throws IOException {
-        final ScaleConstraint scaleConstraint = getScaleConstraint();
-        // If an identifier is present in the URI, and it contains a scale
-        // constraint suffix...
-        if (scaleConstraint != null) {
-            Reference newRef = null;
-            // ...and the numerator and denominator are equal, redirect to the
-            // non-suffixed identifier.
-            if (scaleConstraint.getRational().getNumerator() ==
-                    scaleConstraint.getRational().getDenominator()) {
-                newRef = getPublicReference(scaleConstraint);
-            } else {
-                ScaleConstraint reducedConstraint = scaleConstraint.getReduced();
-                // ...and the fraction is not reduced, redirect to the reduced
-                // version.
-                if (!reducedConstraint.equals(scaleConstraint)) {
-                    newRef = getPublicReference(reducedConstraint);
+        MetaIdentifier metaIdentifier = getMetaIdentifier();
+        // If a meta-identifier is present in the URI...
+        if (metaIdentifier != null) {
+            final ScaleConstraint scaleConstraint =
+                    metaIdentifier.getScaleConstraint();
+            // and it contains a scale constraint...
+            if (scaleConstraint != null) {
+                Reference newRef = null;
+                // ...and the numerator and denominator are equal, redirect to
+                // the non-suffixed identifier.
+                if (!scaleConstraint.hasEffect()) {
+                    metaIdentifier = new MetaIdentifier(metaIdentifier);
+                    metaIdentifier.setScaleConstraint(null);
+                    newRef = getPublicReference(metaIdentifier);
+                } else {
+                    ScaleConstraint reducedConstraint =
+                            scaleConstraint.getReduced();
+                    // ...and the fraction is not reduced, redirect to the
+                    // reduced version.
+                    if (!reducedConstraint.equals(scaleConstraint)) {
+                        metaIdentifier = new MetaIdentifier(metaIdentifier);
+                        metaIdentifier.setScaleConstraint(reducedConstraint);
+                        newRef = getPublicReference(metaIdentifier);
+                    }
                 }
-            }
-            if (newRef != null) {
-                getResponse().setStatus(301);
-                getResponse().setHeader("Location", newRef.toString());
-                new StringRepresentation("Redirect: " + newRef + "\n")
-                        .write(getResponse().getOutputStream());
-                return true;
+                if (newRef != null) {
+                    getResponse().setStatus(301);
+                    getResponse().setHeader("Location", newRef.toString());
+                    new StringRepresentation("Redirect: " + newRef + "\n")
+                            .write(getResponse().getOutputStream());
+                    return true;
+                }
             }
         }
         return false;
     }
 
     /**
-     * @param virtualSize Orientation-aware full source image size.
-     * @param scale       May be {@literal null}.
+     * @param virtualSize   Orientation-aware full source image size.
+     * @param scale         May be {@code null}.
+     * @param invalidStatus Status code to return when the given scale fails
+     *                      validation.
      */
     protected void validateScale(Dimension virtualSize,
-                                 Scale scale) throws ScaleRestrictedException {
-        final ScaleConstraint scaleConstraint = (getScaleConstraint() != null) ?
-                getScaleConstraint() : new ScaleConstraint(1, 1);
+                                 Scale scale,
+                                 Status invalidStatus) throws ScaleRestrictedException {
+        final ScaleConstraint scaleConstraint =
+                (getMetaIdentifier().getScaleConstraint() != null) ?
+                getMetaIdentifier().getScaleConstraint() : new ScaleConstraint(1, 1);
         double scalePct = scaleConstraint.getRational().doubleValue();
         if (scale != null) {
-            scalePct = Arrays.stream(scale.getResultingScales(virtualSize,
-                            scaleConstraint)).max().orElse(1);
+            scalePct = Arrays.stream(
+                    scale.getResultingScales(virtualSize, scaleConstraint))
+                    .max().orElse(1);
         }
-
         final Configuration config = Configuration.getInstance();
         final double maxScale      = config.getDouble(Key.MAX_SCALE, 1.0);
         if (maxScale > 0.0001 && scalePct > maxScale) {
-            throw new ScaleRestrictedException(maxScale);
+            throw new ScaleRestrictedException(invalidStatus, maxScale);
         }
     }
 

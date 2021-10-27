@@ -1,64 +1,89 @@
 package edu.illinois.library.cantaloupe.http;
 
-import org.junit.Before;
-import org.junit.Test;
+import edu.illinois.library.cantaloupe.test.BaseTest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-public class ReferenceTest {
+public class ReferenceTest extends BaseTest {
 
     private Reference instance;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    public void setUp() throws Exception {
+        super.setUp();
         instance = new Reference("http://user:secret@example.org:81/p1/p2.jpg?q1=cats&q2=dogs#35");
     }
 
     @Test
-    public void testDecode() {
-        String uri = "http://example.org/cats%2Fdogs?cats=dogs";
+    void testDecode() {
+        String uri      = "http://example.org/cats%2Fdogs?cats=dogs";
         String expected = "http://example.org/cats/dogs?cats=dogs";
         assertEquals(expected, Reference.decode(uri));
     }
 
     @Test
-    public void testCopyConstructor() {
-        Reference copy = new Reference(instance);
-        assertEquals(copy, instance);
+    void testEncode() {
+        String str      = "dogs?cats=dogs";
+        String expected = "dogs%3Fcats%3Ddogs";
+        assertEquals(expected, Reference.encode(str));
     }
 
     @Test
-    public void testCopyConstructorClonesQuery() {
+    void testCopyConstructor() {
+        Reference copy = new Reference(instance);
+        assertEquals(copy, instance);
+        assertNotSame(copy.getQuery(), instance.getQuery());
+    }
+
+    @Test
+    void testCopyConstructorClonesQuery() {
         Reference copy = new Reference(instance);
         assertNotSame(instance.getQuery(), copy.getQuery());
     }
 
     @Test
-    public void testStringConstructor() {
+    void testStringConstructor() {
         String uri = "http://example.org/cats/dogs?cats=dogs";
         Reference ref = new Reference(uri);
         assertEquals(uri, ref.toString());
     }
 
     @Test
-    public void testURIConstructor() throws Exception {
+    void testStringConstructorWithUnencodedCharacters() {
+        String uri = "http://example.org/cats`/`dogs?cats=dogs`";
+        Reference ref = new Reference(uri);
+        assertEquals("http://example.org/cats%60/%60dogs?cats=dogs%60",
+                ref.toString());
+    }
+
+    @Test
+    void testStringConstructorWithEncodedCharacters() {
+        String uri = "http://example.org/cats%2Fdogs";
+        Reference ref = new Reference(uri);
+        assertEquals("http://example.org/cats%2Fdogs", ref.toString());
+    }
+
+    @Test
+    void testURIConstructor() throws Exception {
         URI uri = new URI("http://example.org/cats/dogs?cats=dogs");
         Reference ref = new Reference(uri);
         assertEquals(uri.toString(), ref.toString());
     }
 
     @Test
-    public void testApplyProxyHeadersWithNoProxyHeaders() {
+    void testApplyProxyHeadersWithNoProxyHeaders() {
         final String expected = instance.toString();
         instance.applyProxyHeaders(new Headers());
         assertEquals(expected, instance.toString());
     }
 
     @Test
-    public void testApplyProxyHeadersWithHTTPSchemeAndXForwardedProtoHTTP() {
+    void testApplyProxyHeadersWithHTTPSchemeAndXForwardedProtoHTTP() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Proto", "HTTP");
         Reference ref = new Reference("http://bogus/cats");
@@ -67,7 +92,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithHTTPSchemeAndXForwardedProtoHTTPS() {
+    void testApplyProxyHeadersWithHTTPSchemeAndXForwardedProtoHTTPS() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Proto", "HTTPS");
         Reference ref = new Reference("http://bogus/cats");
@@ -76,7 +101,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithHTTPSSchemeAndXForwardedProtoHTTP() {
+    void testApplyProxyHeadersWithHTTPSSchemeAndXForwardedProtoHTTP() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Proto", "HTTP");
         Reference ref = new Reference("https://bogus/cats");
@@ -85,7 +110,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithHTTPSSchemeAndXForwardedProtoHTTPS() {
+    void testApplyProxyHeadersWithHTTPSSchemeAndXForwardedProtoHTTPS() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Proto", "HTTPS");
         Reference ref = new Reference("https://bogus/cats");
@@ -94,7 +119,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedHost() {
+    void testApplyProxyHeadersWithXForwardedHost() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Host", "example.org");
         Reference ref = new Reference("http://bogus/cats");
@@ -103,7 +128,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithHTTPSchemeAndXForwardedHostContainingDefaultPort() {
+    void testApplyProxyHeadersWithHTTPSchemeAndXForwardedHostContainingDefaultPort() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Host", "example.org:80");
         Reference ref = new Reference("http://bogus/cats");
@@ -112,7 +137,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithHTTPSSchemeAndXForwardedHostContainingDefaultPort() {
+    void testApplyProxyHeadersWithHTTPSSchemeAndXForwardedHostContainingDefaultPort() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Host", "example.org:443");
         Reference ref = new Reference("https://bogus/cats");
@@ -121,7 +146,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedHostContainingCustomPort() {
+    void testApplyProxyHeadersWithXForwardedHostContainingCustomPort() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Host", "example.org:8080");
         Reference ref = new Reference("http://bogus/cats");
@@ -130,7 +155,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedHostContainingCustomPortAndXForwardedPort() {
+    void testApplyProxyHeadersWithXForwardedHostContainingCustomPortAndXForwardedPort() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Host", "example.org:8080");
         headers.set("X-Forwarded-Port", "8283");
@@ -140,7 +165,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedHostContainingCustomPortAndXForwardedProto() {
+    void testApplyProxyHeadersWithXForwardedHostContainingCustomPortAndXForwardedProto() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Host", "example.org:8080");
         headers.set("X-Forwarded-Proto", "HTTP");
@@ -150,7 +175,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedPortMatchingDefaultHTTPPort() {
+    void testApplyProxyHeadersWithXForwardedPortMatchingDefaultHTTPPort() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Port", "80");
         Reference ref = new Reference("http://bogus/cats");
@@ -159,7 +184,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedPortMatchingDefaultHTTPSPort() {
+    void testApplyProxyHeadersWithXForwardedPortMatchingDefaultHTTPSPort() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Port", "443");
         Reference ref = new Reference("https://bogus/cats");
@@ -168,7 +193,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedPort() {
+    void testApplyProxyHeadersWithXForwardedPort() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Port", "569");
         Reference ref = new Reference("http://bogus/cats");
@@ -177,7 +202,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedPath1() {
+    void testApplyProxyHeadersWithXForwardedPath1() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Path", "/");
         Reference ref = new Reference("http://bogus/cats");
@@ -186,7 +211,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testApplyProxyHeadersWithXForwardedPath2() {
+    void testApplyProxyHeadersWithXForwardedPath2() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Path", "/this/is/the/path");
         Reference ref = new Reference("http://bogus/cats");
@@ -198,7 +223,7 @@ public class ReferenceTest {
      * Tests behavior when using chained {@literal X-Forwarded} headers.
      */
     @Test
-    public void testApplyProxyHeadersUsingChainedXForwardedHeaders() {
+    void testApplyProxyHeadersUsingChainedXForwardedHeaders() {
         Headers headers = new Headers();
         headers.set("X-Forwarded-Proto", "http,https");
         headers.set("X-Forwarded-Host", "example.org,example.mil");
@@ -210,7 +235,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testEqualsWithEqualObjects() {
+    void testEqualsWithEqualObjects() {
         // equal strings
         Reference ref1 = new Reference("https://user:secret@example.org:81/cats/dogs?cats=dogs&foxes=hens#frag");
         Reference ref2 = new Reference("https://user:secret@example.org:81/cats/dogs?cats=dogs&foxes=hens#frag");
@@ -228,7 +253,7 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testEqualsWithUnequalObjects() {
+    void testEqualsWithUnequalObjects() {
         // different scheme
         Reference ref1 = new Reference("https://user:secret@example.org:81/cats/dogs?cats=dogs&foxes=hens#frag");
         Reference ref2 = new Reference("http://user:secret@example.org:81/cats/dogs?cats=dogs&foxes=hens#frag");
@@ -271,22 +296,62 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testGetFragment() {
+    void testGetAuthorityWithUserInfo() {
+        assertEquals("user:secret@example.org:81", instance.getAuthority());
+    }
+
+    @Test
+    void testGetAuthorityWithoutUserInfo() {
+        instance.setUser(null);
+        instance.setSecret(null);
+        assertEquals("example.org:81", instance.getAuthority());
+    }
+
+    @Test
+    void testGetAuthorityWithHTTPSchemeAndStandardPort() {
+        instance.setScheme("http");
+        instance.setPort(80);
+        assertEquals("user:secret@example.org", instance.getAuthority());
+    }
+
+    @Test
+    void testGetAuthorityWithHTTPSchemeAndNonStandardPort() {
+        instance.setScheme("http");
+        instance.setPort(81);
+        assertEquals("user:secret@example.org:81", instance.getAuthority());
+    }
+
+    @Test
+    void testGetAuthorityWithHTTPSSchemeAndStandardPort() {
+        instance.setScheme("httpS");
+        instance.setPort(443);
+        assertEquals("user:secret@example.org", instance.getAuthority());
+    }
+
+    @Test
+    void testGetAuthorityWithHTTPSSchemeAndNonStandardPort() {
+        instance.setScheme("httpS");
+        instance.setPort(444);
+        assertEquals("user:secret@example.org:444", instance.getAuthority());
+    }
+
+    @Test
+    void testGetFragment() {
         assertEquals("35", instance.getFragment());
     }
 
     @Test
-    public void testGetHost() {
+    void testGetHost() {
         assertEquals("example.org", instance.getHost());
     }
 
     @Test
-    public void testGetPath() {
+    void testGetPath() {
         assertEquals("/p1/p2.jpg", instance.getPath());
     }
 
     @Test
-    public void testGetPathComponents() {
+    void testGetPathComponents() {
         List<String> components = instance.getPathComponents();
         assertEquals(2, components.size());
         assertEquals("p1", components.get(0));
@@ -294,17 +359,17 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testGetPathExtension() {
+    void testGetPathExtension() {
         assertEquals("jpg", instance.getPathExtension());
     }
 
     @Test
-    public void testGetPort() {
+    void testGetPort() {
         assertEquals(81, instance.getPort());
     }
 
     @Test
-    public void testGetQuery() {
+    void testGetQuery() {
         Query expected = new Query();
         expected.set("q1", "cats");
         expected.set("q2", "dogs");
@@ -313,48 +378,74 @@ public class ReferenceTest {
     }
 
     @Test
-    public void testGetRelativePath() {
+    void testGetRelativePath() {
         instance.setPath("/p1/p2/p3");
         assertEquals("/p2/p3", instance.getRelativePath("/p1"));
     }
 
     @Test
-    public void testGetScheme() {
+    void testGetScheme() {
         assertEquals("http", instance.getScheme());
     }
 
     @Test
-    public void testHashCode() {
+    void testHashCode() {
         assertEquals(instance.toString().hashCode(), instance.hashCode());
     }
 
     @Test
-    public void testSetPathComponent() {
+    void testSetPathComponent() {
         instance.setPathComponent(0, "new");
         assertEquals("/new/p2.jpg", instance.getPath());
     }
 
-    @Test(expected = IndexOutOfBoundsException.class)
-    public void testSetPathComponentWithIndexOutOfBounds() {
-        instance.setPathComponent(2, "new");
-    }
-
-    @Test(expected = NullPointerException.class)
-    public void testSetQueryWithNullArgument() {
-        instance.setQuery(null);
+    @Test
+    void testSetPathComponentWithIndexOutOfBounds() {
+        assertThrows(IndexOutOfBoundsException.class,
+                () -> instance.setPathComponent(2, "new"));
     }
 
     @Test
-    public void testToURI() throws Exception {
-        URI expected = new URI(instance.toString());
-        URI actual = instance.toURI();
+    void testSetQueryWithNullArgument() {
+        assertThrows(IllegalArgumentException.class,
+                () -> instance.setQuery(null));
+    }
+
+    @Test
+    void testToString1() {
+        String expected = "http://user:secret@example.org:81/p1/p2.jpg?q1=cats&q2=dogs#35";
+        String actual = instance.toString();
         assertEquals(expected, actual);
     }
 
     @Test
-    public void testToString() {
+    void testToString1Encoding() {
+        instance        = new Reference("http://user`:secret`@example.org:81/p`/p2.jpg?q1=cats`");
+        String expected = "http://user%60:secret%60@example.org:81/p%60/p2.jpg?q1=cats%60";
+        String actual   = instance.toString();
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void testToString2() {
         String expected = "http://user:secret@example.org:81/p1/p2.jpg?q1=cats&q2=dogs#35";
         String actual = instance.toString();
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void testToString2WithEncodingPath() {
+        instance        = new Reference("http://user`:secret`@example.org:81/p`/p2.jpg?q1=cats`");
+        String expected = "http://user%60:secret%60@example.org:81%2Fp%2560%2Fp2.jpg?q1=cats%60";
+        String actual   = instance.toString(true);
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void testToString2WithNotEncodingPath() {
+        instance        = new Reference("http://user`:secret`@example.org:81/pp%2Fpp2.jpg?q1=cats`");
+        String expected = "http://user%60:secret%60@example.org:81/pp%2Fpp2.jpg?q1=cats%60";
+        String actual   = instance.toString(false);
         assertEquals(expected, actual);
     }
 

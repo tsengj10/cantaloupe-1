@@ -2,11 +2,12 @@ package edu.illinois.library.cantaloupe.processor;
 
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Info;
+import edu.illinois.library.cantaloupe.image.Metadata;
+import edu.illinois.library.cantaloupe.image.Orientation;
+import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.ColorTransform;
 import edu.illinois.library.cantaloupe.image.Format;
-import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.operation.Encode;
-import edu.illinois.library.cantaloupe.operation.MetadataCopy;
 import edu.illinois.library.cantaloupe.operation.Operation;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
@@ -18,15 +19,16 @@ import edu.illinois.library.cantaloupe.operation.Transpose;
 import edu.illinois.library.cantaloupe.operation.overlay.Overlay;
 import edu.illinois.library.cantaloupe.image.Compression;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReader;
+import edu.illinois.library.cantaloupe.processor.codec.ImageReaderFactory;
 import edu.illinois.library.cantaloupe.processor.codec.ImageWriter;
 import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
 import edu.illinois.library.cantaloupe.processor.codec.ReaderHint;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.media.jai.Interpolation;
 import javax.media.jai.RenderedOp;
+import java.awt.color.ColorSpace;
 import java.awt.image.BufferedImage;
 import java.awt.image.RenderedImage;
 import java.io.IOException;
@@ -53,44 +55,13 @@ class JaiProcessor extends AbstractImageIOProcessor
     private static final Logger LOGGER =
             LoggerFactory.getLogger(JaiProcessor.class);
 
-    private static final Set<ProcessorFeature> SUPPORTED_FEATURES =
-            Collections.unmodifiableSet(EnumSet.of(
-                    ProcessorFeature.MIRRORING,
-                    ProcessorFeature.REGION_BY_PERCENT,
-                    ProcessorFeature.REGION_BY_PIXELS,
-                    ProcessorFeature.REGION_SQUARE,
-                    ProcessorFeature.ROTATION_ARBITRARY,
-                    ProcessorFeature.ROTATION_BY_90S,
-                    ProcessorFeature.SIZE_ABOVE_FULL,
-                    ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_HEIGHT,
-                    ProcessorFeature.SIZE_BY_PERCENT,
-                    ProcessorFeature.SIZE_BY_WIDTH,
-                    ProcessorFeature.SIZE_BY_WIDTH_HEIGHT));
-
-    private static final Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-            SUPPORTED_IIIF_1_1_QUALITIES = Collections.unmodifiableSet(EnumSet.of(
-                    edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.BITONAL,
-                    edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.COLOR,
-                    edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.GREY,
-                    edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.NATIVE));
-
-    private static final Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-            SUPPORTED_IIIF_2_0_QUALITIES = Collections.unmodifiableSet(EnumSet.of(
-                    edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.BITONAL,
-                    edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.COLOR,
-                    edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.DEFAULT,
-                    edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.GRAY));
-
     /**
      * Override that disables support for GIF source images.
      */
     @Override
     public Set<Format> getAvailableOutputFormats() {
         Set<Format> formats;
-        if (Format.GIF.equals(getSourceFormat())) {
+        if (Format.get("gif").equals(getSourceFormat())) {
             formats = Collections.emptySet();
         } else {
             formats = super.getAvailableOutputFormats();
@@ -99,82 +70,68 @@ class JaiProcessor extends AbstractImageIOProcessor
     }
 
     @Override
-    public Set<ProcessorFeature> getSupportedFeatures() {
-        Set<ProcessorFeature> features;
-        if (!getAvailableOutputFormats().isEmpty()) {
-            features = SUPPORTED_FEATURES;
-        } else {
-            features = Collections.unmodifiableSet(Collections.emptySet());
-        }
-        return features;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-    getSupportedIIIF1Qualities() {
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality> qualities;
-        if (!getAvailableOutputFormats().isEmpty()) {
-            qualities = SUPPORTED_IIIF_1_1_QUALITIES;
-        } else {
-            qualities = Collections.unmodifiableSet(Collections.emptySet());
-        }
-        return qualities;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-    getSupportedIIIF2Qualities() {
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality> qualities;
-        if (!getAvailableOutputFormats().isEmpty()) {
-            qualities = SUPPORTED_IIIF_2_0_QUALITIES;
-        } else {
-            qualities = Collections.unmodifiableSet(Collections.emptySet());
-        }
-        return qualities;
+    public boolean supportsSourceFormat(Format format) {
+        return ImageReaderFactory.supportedFormats().
+                stream().
+                filter(f -> !Format.get("gif").equals(f)).
+                anyMatch(f -> f.equals(format));
     }
 
     @Override
     public void process(final OperationList opList,
-                        final Info imageInfo,
+                        final Info info,
                         final OutputStream outputStream)
-            throws ProcessorException {
-        super.process(opList, imageInfo, outputStream);
+            throws ProcessorException, FormatException {
+        super.process(opList, info, outputStream);
 
         ImageReader reader = null;
         try {
-            reader = getReader();
+
+            reader                        = getReader();
             final Format outputFormat     = opList.getOutputFormat();
-            final Orientation orientation = getEffectiveOrientation();
-            final Dimension fullSize      = imageInfo.getSize();
+            final Metadata metadata       = info.getMetadata();
+            final Orientation orientation = metadata.getOrientation();
+            final Dimension fullSize      = info.getSize();
+            final Crop crop               = (Crop) opList.getFirst(Crop.class);
+            Scale scale                   = (Scale) opList.getFirst(Scale.class);
+            final ScaleConstraint sc      = opList.getScaleConstraint();
             final ReductionFactor rf      = new ReductionFactor();
             final Set<ReaderHint> hints   = EnumSet.noneOf(ReaderHint.class);
 
-            final RenderedImage renderedImage = reader.readRendered(opList,
-                    orientation, rf, hints);
+            final RenderedImage renderedImage = reader.readRendered(
+                    opList.getPageIndex(), crop, scale, sc, rf, hints);
             RenderedOp renderedOp = JAIUtil.getAsRenderedOp(
                     RenderedOp.wrapRenderedImage(renderedImage));
 
-            // If the Encode specifies a max sample size of 8 bits, or if the
-            // output format's max sample size is 8 bits, we will need to
-            // reduce it. HOWEVER, if the output format's max sample size is
-            // LESS THAN 8 bits (I'm looking at you, GIF), don't do anything
-            // and let the writer handle it.
             Encode encode = (Encode) opList.getFirst(Encode.class);
-            if (((encode != null && encode.getMaxComponentSize() <= 8)
-                    || outputFormat.getMaxSampleSize() <= 8)
-                    && !Format.GIF.equals(outputFormat)) {
+            if (encode != null && !Format.get("gif").equals(outputFormat)) {
                 renderedOp = JAIUtil.rescalePixels(renderedOp);
                 renderedOp = JAIUtil.reduceTo8Bits(renderedOp);
             }
 
+            // Apply the Crop operation, if present.
+            if (crop != null) {
+                renderedOp = JAIUtil.cropImage(
+                        renderedOp, opList.getScaleConstraint(), crop, rf);
+            }
+
+            // Correct for orientation -- this will be a no-op if the
+            // orientation is 0.
+            renderedOp = JAIUtil.rotateImage(
+                    renderedOp, orientation.getDegrees());
+
             // Apply remaining operations, except Overlay.
             for (Operation op : opList) {
                 if (op.hasEffect(fullSize, opList)) {
-                    if (op instanceof Crop) {
-                        renderedOp = JAIUtil.cropImage(
-                                renderedOp, opList.getScaleConstraint(),
-                                (Crop) op, rf);
-                    } else if (op instanceof Scale) {
+                    if (op instanceof Scale) {
+                        scale = (Scale) op;
+                        final boolean isLinear = scale.isLinear() &&
+                                !scale.isUp(fullSize, opList.getScaleConstraint());
+                        if (isLinear) {
+                            renderedOp = JAIUtil.convertColor(renderedOp,
+                                    ColorSpace.getInstance(ColorSpace.CS_LINEAR_RGB));
+                        }
+
                         /*
                         JAI has a bug that causes it to fail on certain right-
                         edge compressed TIFF tiles when using the
@@ -183,7 +140,7 @@ class JaiProcessor extends AbstractImageIOProcessor
                         neighbor. The error is an ArrayIndexOutOfBoundsException
                         in PlanarImage.cobbleByte().
 
-                        Issue: https://github.com/medusa-project/cantaloupe/issues/94
+                        Issue: https://github.com/cantaloupe-project/cantaloupe/issues/94
                         Example: /iiif/2/champaign-pyramidal-tiled-lzw.tif/8048,0,800,6928/99,/0/default.jpg
 
                         So, the strategy here is:
@@ -192,7 +149,7 @@ class JaiProcessor extends AbstractImageIOProcessor
                            better than nothing.
                         2) otherwise, use the SubsampleAverage operation.
                         */
-                        if (Format.TIF.equals(getSourceFormat()) &&
+                        if (Format.get("tif").equals(getSourceFormat()) &&
                                 (!Compression.UNCOMPRESSED.equals(reader.getCompression(0)) &&
                                         !Compression.UNDEFINED.equals(reader.getCompression(0)))) {
                             LOGGER.debug("process(): detected compressed TIFF; " +
@@ -220,6 +177,11 @@ class JaiProcessor extends AbstractImageIOProcessor
                                     renderedOp, (Scale) op,
                                     opList.getScaleConstraint(), rf);
                         }
+
+                        if (isLinear) {
+                            renderedOp = JAIUtil.convertColor(renderedOp,
+                                    ColorSpace.getInstance(ColorSpace.CS_sRGB));
+                        }
                     } else if (op instanceof Transpose) {
                         renderedOp = JAIUtil.
                                 transposeImage(renderedOp, (Transpose) op);
@@ -245,19 +207,18 @@ class JaiProcessor extends AbstractImageIOProcessor
                     Java2DUtil.applyOverlay(image, (Overlay) op);
                 }
             }
+
             final ImageWriter writer = new ImageWriterFactory()
                     .newImageWriter((Encode) opList.getFirst(Encode.class));
-            if (opList.getFirst(MetadataCopy.class) != null) {
-                writer.setMetadata(getReader().getMetadata(0));
-            }
-
             if (image != null) {
                 writer.write(image, outputStream);
             } else {
                 writer.write(renderedOp, outputStream);
             }
+        } catch (SourceFormatException e) {
+            throw e;
         } catch (IOException e) {
-            throw new ProcessorException(e.getMessage(), e);
+            throw new ProcessorException(e);
         } finally {
             if (reader != null) {
                 reader.dispose();

@@ -4,7 +4,7 @@ import edu.illinois.library.cantaloupe.async.ThreadPool;
 import edu.illinois.library.cantaloupe.cache.SourceCache;
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
-import edu.illinois.library.cantaloupe.source.StreamSource;
+import edu.illinois.library.cantaloupe.source.Source;
 import edu.illinois.library.cantaloupe.util.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -23,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Downloads content from a {@link StreamSource} to a source cache.
+ * Downloads content from a {@link Source} to a source cache.
  */
 final class SourceCacheDownload implements Future<Path> {
 
@@ -92,8 +93,9 @@ final class SourceCacheDownload implements Future<Path> {
                     // threads to get the image sooner.
                     // If it throws an exception, we will log it and retry a
                     // few times, and only rethrow it on the last try.
-                    Path sourceFile = sourceCache.getSourceImageFile(identifier);
-                    if (sourceFile == null) {
+                    Optional<Path> sourceFile =
+                            sourceCache.getSourceImageFile(identifier);
+                    if (sourceFile.isEmpty()) {
                         downloadToSourceCache();
                     }
                     succeeded = true;
@@ -128,7 +130,7 @@ final class SourceCacheDownload implements Future<Path> {
                 }
             }
 
-            if (sourceCache.getSourceImageFile(identifier) != null) {
+            if (sourceCache.getSourceImageFile(identifier).isPresent()) {
                 return;
             }
 
@@ -183,7 +185,10 @@ final class SourceCacheDownload implements Future<Path> {
     public Path get() throws InterruptedException {
         downloadLatch.await();
         try {
-            return sourceCache.getSourceImageFile(identifier);
+            Optional<Path> optFile = sourceCache.getSourceImageFile(identifier);
+            if (optFile.isPresent()) {
+                return optFile.get();
+            }
         } catch (IOException e) {
             LOGGER.error("get(): {}", e.getMessage());
         }
@@ -195,7 +200,10 @@ final class SourceCacheDownload implements Future<Path> {
                     TimeUnit unit) throws InterruptedException {
         if (downloadLatch.await(timeout, unit)) {
             try {
-                return sourceCache.getSourceImageFile(identifier);
+                Optional<Path> optFile = sourceCache.getSourceImageFile(identifier);
+                if (optFile.isPresent()) {
+                    return optFile.get();
+                }
             } catch (IOException e) {
                 LOGGER.error("get(): {}", e.getMessage());
             }

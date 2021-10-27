@@ -1,5 +1,6 @@
 package edu.illinois.library.cantaloupe.perf.processor;
 
+import java.io.OutputStream;
 import java.util.concurrent.TimeUnit;
 
 import edu.illinois.library.cantaloupe.config.Configuration;
@@ -11,7 +12,6 @@ import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.processor.FileProcessor;
 import edu.illinois.library.cantaloupe.processor.ProcessorFactory;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.apache.commons.io.output.NullOutputStream;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -36,7 +36,7 @@ import static edu.illinois.library.cantaloupe.test.PerformanceTestConstants.*;
 @Fork(value = 1, jvmArgs = { "-server", "-Xms128M", "-Xmx128M", "-Dcantaloupe.config=memory" })
 public class KakaduNativeProcessorPerformance {
 
-    private static final Format OUTPUT_FORMAT = Format.PNG;
+    private static final Format OUTPUT_FORMAT = Format.get("png");
 
     private FileProcessor processor;
 
@@ -44,7 +44,7 @@ public class KakaduNativeProcessorPerformance {
     public void setUp() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_FALLBACK, "KakaduNativeProcessor");
-        processor = (FileProcessor) new ProcessorFactory().newProcessor(Format.JP2);
+        processor = (FileProcessor) new ProcessorFactory().newProcessor(Format.get("jp2"));
     }
 
     @TearDown
@@ -54,17 +54,17 @@ public class KakaduNativeProcessorPerformance {
 
     @Benchmark
     public void process() throws Exception {
-        processor.setSourceFormat(Format.JP2);
+        processor.setSourceFormat(Format.get("jp2"));
         processor.setSourceFile(TestUtil.getImage("jp2-5res-rgb-64x56x8-monotiled-lossy.jp2"));
         processor.process(
-                new OperationList(new Encode(OUTPUT_FORMAT)),
+                OperationList.builder().withOperations(new Encode(OUTPUT_FORMAT)).build(),
                 Info.builder().withSize(64, 56).build(),
-                new NullOutputStream());
+                OutputStream.nullOutputStream());
     }
 
     @Benchmark
     public void readInfo() throws Exception {
-        processor.setSourceFormat(Format.JP2);
+        processor.setSourceFormat(Format.get("jp2"));
         processor.setSourceFile(TestUtil.getImage("jp2-5res-rgb-64x56x8-monotiled-lossy.jp2"));
         processor.readInfo();
     }

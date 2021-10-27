@@ -7,13 +7,15 @@ import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
+import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.overlay.Overlay;
-import edu.illinois.library.cantaloupe.operation.overlay.OverlayService;
+import edu.illinois.library.cantaloupe.operation.overlay.OverlayFactory;
 import edu.illinois.library.cantaloupe.operation.redaction.Redaction;
 import edu.illinois.library.cantaloupe.operation.redaction.RedactionService;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,12 +27,14 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
  * <p>Normalized list of {@link Operation image transform operations}
- * associated with a source image identified by an {@link Identifier}.</p>
+ * associated with a source image that is identified by either a {@link
+ * MetaIdentifier} or {@link Identifier}.</p>
  *
  * <p>This class has dual purposes:</p>
  *
@@ -38,7 +42,7 @@ import java.util.stream.Stream;
  *     <li>To describe a list of image transform operations;</li>
  *     <li>To uniquely identify a post-processed (&quot;derivative&quot;) image
  *     created using the instance. For example, the return values of {@link
- *     #toString()} and {@link #toFilename()} may be used in cache keys.</li>
+ *     #toString()} or {@link #toFilename()} may be used in cache keys.</li>
  * </ol>
  *
  * <p>Endpoints translate request arguments into instances of this class, in
@@ -53,17 +57,71 @@ import java.util.stream.Stream;
  */
 public final class OperationList implements Iterable<Operation> {
 
+    public static final class Builder {
+
+        private Identifier identifier;
+        private MetaIdentifier metaIdentifier;
+        private Operation[] operations;
+        private Map<String,String> options;
+        private int pageIndex;
+
+        public Builder withIdentifier(Identifier identifier) {
+            this.identifier = identifier;
+            return this;
+        }
+
+        public Builder withMetaIdentifier(MetaIdentifier metaIdentifier) {
+            this.metaIdentifier = metaIdentifier;
+            return this;
+        }
+
+        public Builder withOperations(Operation... operations) {
+            this.operations = operations;
+            return this;
+        }
+
+        public Builder withOptions(Map<String,String> options) {
+            this.options = options;
+            return this;
+        }
+
+        public Builder withPageIndex(int pageIndex) {
+            this.pageIndex = pageIndex;
+            return this;
+        }
+
+        public OperationList build() {
+            OperationList opList = new OperationList();
+            opList.setIdentifier(identifier);
+            opList.setMetaIdentifier(metaIdentifier);
+            opList.setPageIndex(pageIndex);
+            if (operations != null) {
+                opList.operations.addAll(List.of(operations));
+            }
+            if (options != null) {
+                opList.options.putAll(options);
+            }
+            return opList;
+        }
+
+    }
+
     private static final Logger LOGGER =
             LoggerFactory.getLogger(OperationList.class);
 
     private boolean isFrozen;
     private Identifier identifier;
+    private MetaIdentifier metaIdentifier;
     private final List<Operation> operations = new ArrayList<>();
     private final Map<String,Object> options = new HashMap<>();
-    private ScaleConstraint scaleConstraint = new ScaleConstraint(1, 1);
+    private int pageIndex;
+
+    public static OperationList.Builder builder() {
+        return new Builder();
+    }
 
     /**
-     * Constructs a minimal valid instance.
+     * No-op constructor.
      */
     public OperationList() {}
 
@@ -72,28 +130,34 @@ public final class OperationList implements Iterable<Operation> {
         setIdentifier(identifier);
     }
 
-    public OperationList(Operation... operations) {
+    public OperationList(MetaIdentifier identifier) {
         this();
-        for (Operation op : operations) {
-            add(op);
-        }
-    }
-
-    public OperationList(Identifier identifier, Operation... operations) {
-        this(operations);
-        setIdentifier(identifier);
+        setMetaIdentifier(identifier);
     }
 
     /**
      * Adds an operation to the end of the list.
      *
-     * @param op Operation to add. Null values are silently discarded.
+     * @param op Operation to add. {@code null} values are silently discarded.
      * @throws IllegalStateException if the instance is frozen.
      */
     public void add(Operation op) {
-        checkFrozen();
         if (op != null) {
+            checkFrozen();
             operations.add(op);
+        }
+    }
+
+    /**
+     * Inserts an operation at the given index in the list.
+     *
+     * @param op Operation to add. {@code null} values are silently discarded.
+     * @throws IllegalStateException if the instance is frozen.
+     */
+    public void add(int index, Operation op) {
+        if (op != null) {
+            checkFrozen();
+            operations.add(index, op);
         }
     }
 
@@ -102,22 +166,22 @@ public final class OperationList implements Iterable<Operation> {
      * class in the list. If there are no such instances in the list, the
      * operation will be added to the end of the list.
      *
-     * @param op         Operation to add.
+     * @param op         Operation to add. {@code null} values are silently
+     *                   discarded.
      * @param afterClass The operation will be added after the last
      *                   instance of this class in the list.
      * @throws IllegalStateException if the instance is frozen.
      */
     public void addAfter(Operation op,
                          Class<? extends Operation> afterClass) {
-        checkFrozen();
-        if (op == null) {
-            return;
-        }
-        final int index = lastIndexOf(afterClass);
-        if (index >= 0) {
-            operations.add(index + 1, op);
-        } else {
-            add(op);
+        if (op != null) {
+            checkFrozen();
+            final int index = lastIndexOf(afterClass);
+            if (index >= 0) {
+                operations.add(index + 1, op);
+            } else {
+                add(op);
+            }
         }
     }
 
@@ -133,24 +197,23 @@ public final class OperationList implements Iterable<Operation> {
      */
     public void addBefore(Operation op,
                           Class<? extends Operation> beforeClass) {
-        checkFrozen();
-        if (op == null) {
-            return;
-        }
-        int index = firstIndexOf(beforeClass);
-        if (index >= 0) {
-            operations.add(index, op);
-        } else {
-            add(op);
+        if (op != null) {
+            checkFrozen();
+            int index = firstIndexOf(beforeClass);
+            if (index >= 0) {
+                operations.add(index, op);
+            } else {
+                add(op);
+            }
         }
     }
 
     /**
-     * <p>Most image-processing operations (crop, scale, etc.) are specified in
-     * a client request to an endpoint. This method adds any other operations or
-     * options that endpoints have nothing to do with, and also tweaks existing
-     * operations according to either/both the application configuration and
-     * delegate method return values.</p>
+     * <p>Most image-processing operations (crop, scale, etc.) are supplied by
+     * a client in a request to an endpoint. This method adds any other
+     * operations or options that endpoints have nothing to do with, and also
+     * tweaks existing operations according to either/both the application
+     * configuration and delegate method return values.</p>
      *
      * <p>This method must be called <strong>after</strong> all endpoint
      * operations have been added, as it may modify them.</p>
@@ -169,7 +232,7 @@ public final class OperationList implements Iterable<Operation> {
         if (getScaleConstraint().hasEffect()) {
             Scale scale = (Scale) getFirst(Scale.class);
             if (scale == null) {
-                scale = new Scale();
+                scale = new ScaleByPercent();
                 int index = firstIndexOf(Crop.class);
                 if (index == -1) {
                     operations.add(0, scale);
@@ -184,40 +247,38 @@ public final class OperationList implements Iterable<Operation> {
 
         // If the source image has a different orientation, adjust any Crop
         // and Rotate operations accordingly.
-        final Orientation sourceImageOrientation = info.getOrientation();
-        if (sourceImageOrientation != null) {
-            Crop crop = (Crop) getFirst(Crop.class);
+        final Metadata srcMetadata = info.getMetadata();
+        if (srcMetadata != null) {
+            final Orientation orientation = srcMetadata.getOrientation();
+            final Crop crop = (Crop) getFirst(Crop.class);
             if (crop != null) {
-                crop.setOrientation(sourceImageOrientation);
+                crop.setOrientation(orientation);
             }
-
-            Rotate rotate = (Rotate) getFirst(Rotate.class);
+            final Rotate rotate = (Rotate) getFirst(Rotate.class);
             if (rotate != null) {
-                rotate.addDegrees(sourceImageOrientation.getDegrees());
+                rotate.addDegrees(orientation.getDegrees());
             }
         }
 
         // Redactions
-        try {
-            final RedactionService service = new RedactionService();
-            if (service.isEnabled()) {
+        if (delegateProxy != null) {
+            try {
+                final RedactionService service = new RedactionService();
                 List<Redaction> redactions = service.redactionsFor(delegateProxy);
                 for (Redaction redaction : redactions) {
                     addBefore(redaction, Encode.class);
                 }
-            } else {
-                LOGGER.trace("applyNonEndpointMutations(): redactions are " +
-                        "disabled; skipping.");
+            } catch (Exception e) {
+                LOGGER.error(e.getMessage(), e);
             }
-        } catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
         }
 
         // Scale customization
         final Scale scale = (Scale) getFirst(Scale.class);
         if (scale != null) {
-            // Max scale
-            scale.setMaxScale(config.getDouble(Key.MAX_SCALE, 1.0));
+            // Linear
+            scale.setLinear(
+                    config.getBoolean(Key.PROCESSOR_DOWNSCALE_LINEAR, false));
 
             // Filter
             double[] scales = scale.getResultingScales(
@@ -246,61 +307,71 @@ public final class OperationList implements Iterable<Operation> {
 
         // Overlay
         try {
-            final OverlayService service = new OverlayService();
-            if (service.isEnabled() &&
-                    service.shouldApplyToImage(getResultingSize(sourceImageSize))) {
-                final Overlay overlay = service.newOverlay(delegateProxy);
-                if (overlay != null) {
-                    addBefore(overlay, Encode.class);
-                } else {
-                    LOGGER.trace("applyNonEndpointMutations(): delegate " +
-                            "requested no overlay.");
-                }
-            } else {
-                LOGGER.trace("applyNonEndpointMutations(): overlays are " +
-                        "disabled; skipping.");
+            final OverlayFactory overlayFactory = new OverlayFactory();
+            if (overlayFactory.shouldApplyToImage(getResultingSize(sourceImageSize))) {
+                final Optional<Overlay> overlay =
+                        overlayFactory.newOverlay(delegateProxy);
+                overlay.ifPresent(ov -> addBefore(ov, Encode.class));
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
         }
 
-        // Metadata copies
-        // TODO: consider making these a property of Encode
-        if (config.getBoolean(Key.PROCESSOR_PRESERVE_METADATA, false)) {
-            addBefore(new MetadataCopy(), Encode.class);
-        }
-
         // Encode customization
         final Encode encode = (Encode) getFirst(Encode.class);
-        switch (encode.getFormat()) {
-            case JPG:
-                // Compression
-                encode.setCompression(Compression.JPEG);
-                // Interlacing
-                final boolean progressive =
-                        config.getBoolean(Key.PROCESSOR_JPG_PROGRESSIVE, false);
-                encode.setInterlacing(progressive);
-                // Quality
-                final int quality =
-                        config.getInt(Key.PROCESSOR_JPG_QUALITY, 80);
-                encode.setQuality(quality);
-                break;
-            case TIF:
-                // Compression
-                final String compressionStr =
-                        config.getString(Key.PROCESSOR_TIF_COMPRESSION, "LZW");
-                final Compression compression =
-                        Compression.valueOf(compressionStr.toUpperCase());
-                encode.setCompression(compression);
-                break;
+        if (encode != null && Format.get("jpg").equals(encode.getFormat())) {
+            // Compression
+            encode.setCompression(Compression.JPEG);
+            // Interlacing
+            final boolean progressive =
+                    config.getBoolean(Key.PROCESSOR_JPG_PROGRESSIVE, false);
+            encode.setInterlacing(progressive);
+            // Quality
+            final int quality =
+                    config.getInt(Key.PROCESSOR_JPG_QUALITY, 80);
+            encode.setQuality(quality);
+        } else if (encode != null && Format.get("tif").equals(encode.getFormat())) {
+            // Compression
+            final String compressionStr =
+                    config.getString(Key.PROCESSOR_TIF_COMPRESSION, "LZW");
+            final Compression compression =
+                    Compression.valueOf(compressionStr.toUpperCase());
+            encode.setCompression(compression);
         }
 
         // Set the Encode operation's background color.
-        if (!encode.getFormat().supportsTransparency()) {
+        if (encode != null && !encode.getFormat().supportsTransparency()) {
             final String bgColor = config.getString(Key.PROCESSOR_BACKGROUND_COLOR);
             if (bgColor != null) {
                 encode.setBackgroundColor(Color.fromString(bgColor));
             }
+        }
+
+        // Add metadata.
+        Metadata metadata = null;
+        // Add XMP metadata returned from a delegate method, if any.
+        if (delegateProxy != null) {
+            try {
+                final String xmp = delegateProxy.getMetadata();
+                if (xmp != null) {
+                    metadata = new Metadata();
+                    metadata.setXMP(xmp);
+                }
+            } catch (Exception e) {
+                LOGGER.error(e.getMessage(), e);
+            }
+        }
+        // Source metadata may contain important native information like
+        // e.g. delay time in the case of animated GIF, so that too must be
+        // copied over.
+        if (srcMetadata != null) {
+            if (metadata == null) {
+                metadata = new Metadata();
+            }
+            metadata.setNativeMetadata(srcMetadata.getNativeMetadata());
+        }
+        if (encode != null && metadata != null) {
+            encode.setMetadata(metadata);
         }
     }
 
@@ -348,7 +419,8 @@ public final class OperationList implements Iterable<Operation> {
     }
 
     /**
-     * "Freezes" the instance and all of its operations.
+     * "Freezes" the instance and all of its operations so that they can no
+     * longer be mutated.
      */
     public void freeze() {
         isFrozen = true;
@@ -372,14 +444,32 @@ public final class OperationList implements Iterable<Operation> {
         return null;
     }
 
+    /**
+     * @return The identifier ascribed to the instance, if set; otherwise the
+     *         {@link #getMetaIdentifier() meta-identifier}'s identifier, if
+     *         set; otherwise {@code null}.
+     */
     public Identifier getIdentifier() {
-        return identifier;
+        if (identifier != null) {
+            return identifier;
+        } else if (metaIdentifier != null) {
+            return metaIdentifier.getIdentifier();
+        }
+        return null;
+    }
+
+    public MetaIdentifier getMetaIdentifier() {
+        return metaIdentifier;
+    }
+
+    public List<Operation> getOperations() {
+        return operations;
     }
 
     /**
      * @return Map of auxiliary options separate from the basic
-     *         crop/scale/etc., such as URI query variables, etc. If the
-     *         instance is frozen, the map will be unmodifiable.
+     *         crop/scale/etc., such as URI query arguments, etc. If the
+     *         instance is frozen, the map is unmodifiable.
      */
     public Map<String,Object> getOptions() {
         if (isFrozen) {
@@ -402,6 +492,13 @@ public final class OperationList implements Iterable<Operation> {
     }
 
     /**
+     * @return Page index.
+     */
+    public int getPageIndex() {
+        return pageIndex;
+    }
+
+    /**
      * @param fullSize Full size of the source image to which the instance is
      *                 being applied.
      * @return         Resulting dimensions when all operations are applied in
@@ -415,9 +512,18 @@ public final class OperationList implements Iterable<Operation> {
     }
 
     /**
-     * @return Scale constraint. Never {@literal null}.
+     * Convenience method that returns the instance ascribed to the {@link
+     * #getMetaIdentifier() meta-identifier}, if set, or a neutral instance
+     * otherwise.
      */
     public ScaleConstraint getScaleConstraint() {
+        ScaleConstraint scaleConstraint = null;
+        if (getMetaIdentifier() != null) {
+            scaleConstraint = getMetaIdentifier().getScaleConstraint();
+        }
+        if (scaleConstraint == null) {
+            scaleConstraint = new ScaleConstraint(1, 1);
+        }
         return scaleConstraint;
     }
 
@@ -431,7 +537,9 @@ public final class OperationList implements Iterable<Operation> {
      *                 unmodified source image.
      */
     public boolean hasEffect(Dimension fullSize, Format format) {
-        if (getScaleConstraint().hasEffect()) {
+        if (getMetaIdentifier() != null &&
+                getMetaIdentifier().getScaleConstraint() != null &&
+                getMetaIdentifier().getScaleConstraint().hasEffect()) {
             return true;
         }
         if (!format.equals(getOutputFormat())) {
@@ -439,20 +547,15 @@ public final class OperationList implements Iterable<Operation> {
         }
         for (Operation op : this) {
             if (op.hasEffect(fullSize, this)) {
-                // 1. Ignore MetadataCopies. If the instance would otherwise be
-                //    a no-op, metadata will get passed through anyway, and if
-                //    it isn't, then this method will return false anyway.
-                // 2. Ignore overlays when the output format is PDF.
-                // 3. Ignore Encodes when the given output format is the same
+                // 1. Ignore overlays when the output format is PDF.
+                // 2. Ignore Encodes when the given output format is the same
                 //    as the instance's output format. (This helps enable
                 //    streaming source images without re-encoding them.)
-                if (op instanceof MetadataCopy) { // (1)
-                    continue;
-                } else if (op instanceof Overlay &&
-                        getOutputFormat().equals(Format.PDF)) { // (2)
+                if (op instanceof Overlay &&
+                        getOutputFormat().equals(Format.get("pdf"))) { // (1)
                     continue;
                 } else if (op instanceof Encode &&
-                        format.equals(((Encode) op).getFormat())) { // (3)
+                        format.equals(((Encode) op).getFormat())) { // (2)
                     continue;
                 } else {
                     return true;
@@ -494,9 +597,15 @@ public final class OperationList implements Iterable<Operation> {
         return -1;
     }
 
+    public void remove(Operation op) {
+        checkFrozen();
+        operations.remove(op);
+    }
+
     /**
      * @param identifier
      * @throws IllegalStateException if the instance is frozen.
+     * @see #setMetaIdentifier(MetaIdentifier)
      */
     public void setIdentifier(Identifier identifier) {
         checkFrozen();
@@ -507,15 +616,29 @@ public final class OperationList implements Iterable<Operation> {
      * <p>Sets the effective base scale of the source image upon which the
      * instance is to be applied.</p>
      *
-     * @param scaleConstraint Instance to set.
+     * @param metaIdentifier
      * @throws IllegalStateException if the instance is frozen.
+     * @see #setIdentifier(Identifier)
      */
-    public void setScaleConstraint(ScaleConstraint scaleConstraint) {
+    public void setMetaIdentifier(MetaIdentifier metaIdentifier) {
         checkFrozen();
-        if (scaleConstraint == null) {
-            scaleConstraint = new ScaleConstraint(1, 1);
+        this.metaIdentifier = metaIdentifier;
+    }
+
+    /**
+     * @param pageIndex Zero-based page index.
+     * @throws IllegalStateException if the instance is frozen.
+     * @deprecated Once the {@code page} query argument is no longer supported,
+     *             the page index should be retrieved from the {@link
+     *             #getMetaIdentifier() meta-identifier}.
+     */
+    @Deprecated
+    public void setPageIndex(int pageIndex) {
+        checkFrozen();
+        if (pageIndex < 0) {
+            throw new IllegalArgumentException("Page index must be >= 0");
         }
-        this.scaleConstraint = scaleConstraint;
+        this.pageIndex = pageIndex;
     }
 
     public Stream<Operation> stream() {
@@ -526,25 +649,31 @@ public final class OperationList implements Iterable<Operation> {
      * <p>Returns a filename-safe string guaranteed to uniquely represent the
      * instance. The filename is in the format:</p>
      *
-     * <p>{@literal [hashed identifier]_[hashed scale constraint + operation list + options list].[output format extension]}</p>
+     * <p>{@literal [hashed identifier]_[page number + hashed scale constraint + operation list + options list].[output format extension]}</p>
      *
      * @return Filename string.
      */
     public String toFilename() {
-        // Compile operations
-        final List<String> opStrings = stream().
+        final List<String> parts = new ArrayList<>();
+        // Add page index if != 0
+        if (getPageIndex() != 0) {
+            parts.add("" + getPageIndex());
+        }
+        // Add scale constraint
+        if (getScaleConstraint().hasEffect()) {
+            parts.add(0, getScaleConstraint().toString());
+        }
+        // Add operations
+        parts.addAll(stream().
                 filter(Operation::hasEffect).
                 map(Operation::toString).
-                collect(Collectors.toList());
-        if (getScaleConstraint() != null) {
-            opStrings.add(0, getScaleConstraint().toString());
-        }
+                collect(Collectors.toList()));
         // Add options
         for (String key : getOptions().keySet()) {
-            opStrings.add(key + ":" + this.getOptions().get(key));
+            parts.add(key + ":" + this.getOptions().get(key));
         }
 
-        String opsString = StringUtils.md5(String.join("_", opStrings));
+        String opsString = StringUtils.md5(String.join("_", parts));
 
         String idStr = "";
         Identifier identifier = getIdentifier();
@@ -557,7 +686,6 @@ public final class OperationList implements Iterable<Operation> {
         if (encode != null) {
             extension = "." + encode.getFormat().getPreferredExtension();
         }
-
         return StringUtils.md5(idStr) + "_" + opsString + extension;
     }
 
@@ -586,13 +714,12 @@ public final class OperationList implements Iterable<Operation> {
         if (getIdentifier() != null) {
             map.put("identifier", getIdentifier().toString());
         }
-        if (getScaleConstraint() != null) {
-            map.put("scale_constraint", getScaleConstraint().toMap());
-        }
+        map.put("page_index", getPageIndex());
+        map.put("scale_constraint", getScaleConstraint().toMap());
         map.put("operations", this.stream()
                 .filter(op -> op.hasEffect(fullSize, this))
                 .map(op -> op.toMap(fullSize, getScaleConstraint()))
-                .collect(Collectors.toList()));
+                .collect(Collectors.toUnmodifiableList()));
         map.put("options", getOptions());
         return Collections.unmodifiableMap(map);
     }
@@ -608,9 +735,10 @@ public final class OperationList implements Iterable<Operation> {
         if (getIdentifier() != null) {
             parts.add(getIdentifier().toString());
         }
-        if (getScaleConstraint() != null) {
-            parts.add(getScaleConstraint().toString());
+        if (getPageIndex() != 0) {
+            parts.add(getPageIndex() + "");
         }
+        parts.add(getScaleConstraint().toString());
         for (Operation op : this) {
             if (op.hasEffect()) {
                 final String opName = op.getClass().getSimpleName().toLowerCase();
@@ -629,13 +757,13 @@ public final class OperationList implements Iterable<Operation> {
      *     set}</li>
      *     <li>Checks that an {@link Encode} is present</li>
      *     <li>Calls {@link Operation#validate} on each {@link Operation}</li>
-     *     <li>Validates the {@literal page} {@link #getOptions() option}, if
-     *     present</li>
      *     <li>Checks that the resulting scale is not larger than allowed by
      *     the {@link #getScaleConstraint() scale constraint}</li>
      *     <li>Checks that the resulting pixel area is greater than zero and
      *     less than or equal to {@link Key#MAX_PIXELS} (if set)</li>
      * </ol>
+     *
+     * These are all general validations that are not endpoint-specific.
      *
      * @param fullSize     Full size of the source image on which the instance
      *                     is being applied.
@@ -663,23 +791,6 @@ public final class OperationList implements Iterable<Operation> {
             op.validate(fullSize, getScaleConstraint());
         }
 
-        // "page" is a special query argument used by some processors, namely
-        // ones that read PDFs, that tells them what page to read. Since it's
-        // a de facto standard within the application, we might as well
-        // validate it here to save them the trouble.
-        final String pageStr = (String) getOptions().get("page");
-        if (pageStr != null) {
-            try {
-                final int page = Integer.parseInt(pageStr);
-                if (page < 1) {
-                    throw new ValidationException(
-                            "Page number is out-of-bounds.");
-                }
-            } catch (NumberFormatException e) {
-                throw new ValidationException("Invalid page number.");
-            }
-        }
-
         Dimension resultingSize = getResultingSize(fullSize);
 
         // If there is a scale constraint set, ensure that the resulting scale
@@ -688,12 +799,13 @@ public final class OperationList implements Iterable<Operation> {
         if (scaleConstraint.hasEffect()) {
             Scale scale = (Scale) getFirst(Scale.class);
             if (scale == null) {
-                scale = new Scale(1.0);
+                scale = new ScaleByPercent();
             }
+            final double delta = Math.max(1 / fullSize.width(), 1 / fullSize.height());
+            final double[] scales = scale.getResultingScales(fullSize, scaleConstraint);
 
-            double[] scales = scale.getResultingScales(fullSize, scaleConstraint);
             if (Arrays.stream(scales)
-                    .filter(s -> s > scaleConstraint.getRational().doubleValue())
+                    .filter(s -> s - delta > scaleConstraint.getRational().doubleValue())
                     .findAny()
                     .isPresent()) {
                 throw new IllegalScaleException();
@@ -710,7 +822,7 @@ public final class OperationList implements Iterable<Operation> {
         final long maxAllowedSize =
                 Configuration.getInstance().getLong(Key.MAX_PIXELS, 0);
         if (maxAllowedSize > 0 && hasEffect(fullSize, sourceFormat) &&
-                resultingSize.width() * resultingSize.height() > maxAllowedSize) {
+                resultingSize.area() > maxAllowedSize) {
             throw new IllegalSizeException();
         }
     }

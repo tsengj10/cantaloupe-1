@@ -2,13 +2,10 @@ package edu.illinois.library.cantaloupe.processor;
 
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
-import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ValidationException;
-import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -18,13 +15,17 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * <p>Encapsulates an image codec (encoder + decoder) and processing engine.</p>
+ * <p>Encapsulates an image codec and processing engine.</p>
  *
  * <p>This is an abstract interface. Either or both of {@link FileProcessor}
- * and/or {@link StreamProcessor} must be implemented. Implementations can
- * depend on their source being set (via {@link FileProcessor#setSourceFile} or
- * {@link StreamProcessor#setStreamFactory}) before any methods that would need
- * to access it are called.</p>
+ * and/or {@link StreamProcessor} must be implemented&mdash;but ideally at
+ * least {@link StreamProcessor}.</p>
+ *
+ * <p>Implementations can depend on their source being set (via {@link
+ * FileProcessor#setSourceFile} or {@link StreamProcessor#setStreamFactory})
+ * before any methods that would need to access it are called.</p>
+ *
+ * @since 1.0
  */
 public interface Processor extends AutoCloseable {
 
@@ -57,29 +58,9 @@ public interface Processor extends AutoCloseable {
     }
 
     /**
-     * @return Format of the source image.
+     * @return The same format passed to {@link #setSourceFormat(Format)}.
      */
     Format getSourceFormat();
-
-    /**
-     * @return All features supported by the processor for the set source
-     *         format.
-     */
-    Set<ProcessorFeature> getSupportedFeatures();
-
-    /**
-     * @return All qualities supported by the processor for the set source
-     *         format.
-     */
-    Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-    getSupportedIIIF1Qualities();
-
-    /**
-     * @return All qualities supported by the processor for the set source
-     *         format.
-     */
-    Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-    getSupportedIIIF2Qualities();
 
     /**
      * <p>Returns a list of global (not request-specific) non-fatal warnings,
@@ -87,8 +68,8 @@ public interface Processor extends AutoCloseable {
      *
      * <p>An instance with warnings is still usable.</p>
      *
-     * <p>The return value of {@link #getInitializationError()}, if not
-     * {@literal null}, should not be duplicated here.</p>
+     * <p>The return value of {@link #getInitializationError()}, if not {@code
+     * null}, should not be duplicated here.</p>
      *
      * <p>This default implementation returns an empty list.</p>
      *
@@ -114,19 +95,18 @@ public interface Processor extends AutoCloseable {
      *             called, but not {@link
      *             StreamProcessor#setStreamFactory(StreamFactory)},
      *             implementations should read from a file.</li>
-     *             <li>If vice versa, or if both have been called,
-     *             implementations should read from a stream.</li>
+     *             <li>If vice versa, implementations should read from a
+     *             stream.</li>
+     *             <li>If both have been called, implementations can read from
+     *             either one.</li>
      *         </ul>
      *     </li>
      *     <li>{@link edu.illinois.library.cantaloupe.operation.Operation}s
-     *     should be applied in the order they are iterated. For efficiency's
-     *     sake, implementations should check whether each one is a no-op using
-     *     {@link edu.illinois.library.cantaloupe.operation.Operation#hasEffect(Dimension, OperationList)}
-     *     before performing it.</li>
-     *     <li>The {@link OperationList} will be in an immutable state.
-     *     Implementations are discouraged from performing their own operations
-     *     separate from the ones in the list, as this could cause problems
-     *     with caching.</li>
+     *     should be applied in the order they are iterated.</li>
+     *     <li>The {@link OperationList} will be {@link OperationList#freeze()
+     *     frozen}. Implementations are discouraged from performing operations
+     *     other than the ones in the list, as this could cause problems with
+     *     caching.</li>
      *     <li>In addition to operations, the operation list may contain a
      *     number of {@link OperationList#getOptions() options}, which
      *     implementations should respect, where applicable. Option values may
@@ -144,34 +124,48 @@ public interface Processor extends AutoCloseable {
      *                     instance, as it may have come from a cache.
      * @param outputStream Stream to write the image to, which should not be
      *                     closed.
-     * @throws UnsupportedOutputFormatException Implementations can extend
-     *                                          {@link AbstractProcessor} and
-     *                                          call super to get this check
-     *                                          for free.
-     * @throws ProcessorException If anything goes wrong.
+     * @throws SourceFormatException if the actual format of the
+     *         source image is different from the one passed to {@link
+     *         #setSourceFormat(Format)}.
+     * @throws OutputFormatException if the {@link
+     *         OperationList#getOutputFormat() output format} is not supported.
+     * @throws ProcessorException if anything else goes wrong.
      */
     void process(OperationList opList,
                  Info sourceInfo,
-                 OutputStream outputStream) throws ProcessorException;
+                 OutputStream outputStream) throws FormatException, ProcessorException;
 
     /**
      * <p>Reads and returns information about the source image.</p>
      *
-     * <p>N.B.: The returned instance will not have its {@link
-     * Info#setIdentifier(Identifier) identifier set}. Clients should set it
-     * manually.</p>
+     * <p>If any of the {@link Info}'s properties cannot be set due to an
+     * implementation's inability to read them, it is marked as non-{@link
+     * Info#setPersistable(boolean) persistable}.</p>
      *
-     * @return Information about the source image.
-     * @throws IOException if anything goes wrong.
+     * @return Information about the source image, without an {@link
+     *         Info#getIdentifier() identifier} set.
+     * @throws SourceFormatException if the actual format of the source image
+     *         is different from the one passed to {@link
+     *         #setSourceFormat(Format)}.
+     * @throws IOException if anything else goes wrong.
      */
     Info readInfo() throws IOException;
 
     /**
-     * @param format Format of the source image. Never {@link Format#UNKNOWN}.
-     * @throws UnsupportedSourceFormatException if the given format is not
-     *                                          supported.
+     * @param format Expected format of the source image.
+     * @throws SourceFormatException if the given format is not supported.
      */
-    void setSourceFormat(Format format) throws UnsupportedSourceFormatException;
+    void setSourceFormat(Format format) throws SourceFormatException;
+
+    /**
+     * For a supported source format, an instance is able to generate an image
+     * in at least one {@link #getAvailableOutputFormats() output format}.
+     *
+     * @param format Format to check.
+     * @return Whether the instance supports source images of the given format.
+     * @since 5.0
+     */
+    boolean supportsSourceFormat(Format format);
 
     /**
      * <p>Validates the given operation list, throwing an exception if
@@ -181,33 +175,38 @@ public interface Processor extends AutoCloseable {
      *
      * <ol>
      *     <li>Calls {@link OperationList#validate}</li>
-     *     <li>Ensures that the scale mode is not {@link
-     *     Scale.Mode#NON_ASPECT_FILL} if {@link
-     *     ProcessorFeature#SIZE_BY_DISTORTED_WIDTH_HEIGHT} is not {@link
-     *     #getSupportedFeatures() supported}</li>
+     *     <li>Ensures that the {@link OperationList#getOutputFormat() output
+     *     format specified in the operation list} is supported</li>
      * </ol>
      *
      * <p>Notes:</p>
      *
      * <ul>
-     *     <li>Overrides should call super.</li>
+     *     <li>Overrides should call {@code super}.</li>
      *     <li>It is guaranteed that this method, if called, will always be
      *     called before {@link #process}.</li>
      * </ul>
      *
-     * @param opList Operation list to process. Will be equal to the one passed
-     *               to {@link #process}.
+     * @param opList Operation list to process. Equal to the one passed to
+     *               {@link #process}.
+     * @throws OutputFormatException if the instance is not capable of
+     *         producing the {@link OperationList#getOutputFormat() output
+     *         format specified in the operation list}.
      * @throws ValidationException if validation fails.
-     * @throws ProcessorException  if there is an error in performing the
-     *                             validation.
+     * @throws ProcessorException if there is an error in performing the
+     *         validation.
      */
     default void validate(OperationList opList, Dimension fullSize)
-            throws ValidationException, ProcessorException {
+            throws ValidationException, ProcessorException, OutputFormatException {
         opList.validate(fullSize, getSourceFormat());
+
+        if (!getAvailableOutputFormats().contains(opList.getOutputFormat())) {
+            throw new OutputFormatException(opList.getOutputFormat());
+        }
 
         // TODO: bind Scale.Mode to ProcessorFeature and validate whether the
         // processor supports all of the requested operations.
-        // This isn't needed as of 4.1 because all processors support all
+        // This isn't needed as of 5.0 because all processors support all
         // operations.
     }
 

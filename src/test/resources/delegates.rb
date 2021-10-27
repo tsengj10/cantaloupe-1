@@ -7,7 +7,32 @@ class CustomDelegate
 
   attr_accessor :context
 
-  def authorize(options = {})
+  ##
+  # Works the same as `StandardMetaIdentifierTransformer.deserialize()`.
+  #
+  def deserialize_meta_identifier(meta_identifier)
+    reversed_meta_id = meta_identifier.reverse
+    matches  = /^((?<sc>\d+:\d+);)?((?<pg>\d+);)?(?<id>.+)/.match(reversed_meta_id)
+    captures = matches.named_captures
+    struct                     = {}
+    struct['identifier']       = captures['id'].reverse
+    struct['page_number']      = captures['pg'].reverse.to_i if captures['pg']
+    struct['scale_constraint'] = captures['sc'].reverse.split(':').map(&:to_i) if captures['sc']
+    struct
+  end
+
+  ##
+  # Works the same as `StandardMetaIdentifierTransformer.serialize()`.
+  #
+  def serialize_meta_identifier(components)
+    [
+        components['identifier'],
+        components['page_number'],
+        components['scale_constraint']&.join(':')
+    ].reject(&:nil?).join(';')
+  end
+
+  def pre_authorize(options = {})
     case context['identifier']
       when 'forbidden.jpg', 'forbidden-boolean.jpg'
         return false
@@ -32,6 +57,10 @@ class CustomDelegate
     end
   end
 
+  def authorize(options = {})
+    pre_authorize
+  end
+
   def extra_iiif2_information_response_keys(options = {})
     case context['identifier']
       when 'bogus'
@@ -50,6 +79,10 @@ class CustomDelegate
             }
         }
     end
+  end
+
+  def extra_iiif3_information_response_keys(options = {})
+    extra_iiif2_information_response_keys(options)
   end
 
   def source(options = {})
@@ -232,7 +265,8 @@ class CustomDelegate
             'font_weight' => 1.5,
             'glyph_spacing' => 0.1,
             'stroke_color' => 'blue',
-            'stroke_width' => 3
+            'stroke_width' => 3,
+            'word_wrap' => false
         }
     end
     nil
@@ -240,12 +274,21 @@ class CustomDelegate
 
   def redactions(options = {})
     case context['identifier']
-      when 'bogus'
-        return nil
       when 'empty'
         return []
-      else
+      when 'redacted'
         return [ { 'x' => 0, 'y' => 10, 'width' => 50, 'height' => 70 } ]
+      else
+        return nil
+    end
+  end
+
+  def metadata(options = {})
+    case context['identifier']
+      when 'metadata'
+        return '<rdf:RDF>derivative metadata</rdf:RDF>'
+      else
+        return nil
     end
   end
 

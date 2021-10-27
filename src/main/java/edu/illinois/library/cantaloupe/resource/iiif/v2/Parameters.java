@@ -1,13 +1,14 @@
 package edu.illinois.library.cantaloupe.resource.iiif.v2;
 
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.http.Query;
 import edu.illinois.library.cantaloupe.http.Reference;
 import edu.illinois.library.cantaloupe.image.Dimension;
-import edu.illinois.library.cantaloupe.image.Identifier;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
 import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.OperationList;
-import edu.illinois.library.cantaloupe.processor.UnsupportedOutputFormatException;
 import edu.illinois.library.cantaloupe.resource.IllegalClientArgumentException;
+import edu.illinois.library.cantaloupe.resource.iiif.FormatException;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.Arrays;
@@ -23,7 +24,7 @@ import java.util.stream.Collectors;
  */
 class Parameters {
 
-    private Identifier identifier;
+    private String identifier;
     private Region region;
     private Size size;
     private Rotation rotation;
@@ -40,7 +41,7 @@ class Parameters {
         Parameters params = new Parameters();
         String[] parts = StringUtils.split(paramsStr, "/");
         if (parts.length == 5) {
-            params.setIdentifier(new Identifier(Reference.decode(parts[0])));
+            params.setIdentifier(Reference.decode(parts[0]));
             params.setRegion(Region.fromUri(parts[1]));
             params.setSize(Size.fromUri(parts[2]));
             params.setRotation(Rotation.fromUri(parts[3]));
@@ -60,12 +61,12 @@ class Parameters {
     /**
      * No-op constructor.
      */
-    public Parameters() {}
+    Parameters() {}
 
     /**
      * Copy constructor.
      */
-    public Parameters(Parameters params) {
+    Parameters(Parameters params) {
         setIdentifier(params.getIdentifier());
         setRegion(params.getRegion());
         setSize(params.getSize());
@@ -77,22 +78,21 @@ class Parameters {
 
     /**
      * @param identifier Decoded identifier.
-     * @param region From URI
-     * @param size From URI
-     * @param rotation From URI
-     * @param quality From URI
-     * @param format From URI
-     * @throws UnsupportedOutputFormatException if the {@literal format}
-     *         argument is invalid.
+     * @param region     From URI.
+     * @param size       From URI.
+     * @param rotation   From URI.
+     * @param quality    From URI.
+     * @param format     From URI.
+     * @throws FormatException if the {@literal format} argument is invalid.
      * @throws IllegalClientArgumentException if any of the other arguments are
      *         invalid.
      */
-    public Parameters(Identifier identifier,
-                      String region,
-                      String size,
-                      String rotation,
-                      String quality,
-                      String format) {
+    Parameters(String identifier,
+               String region,
+               String size,
+               String rotation,
+               String quality,
+               String format) {
         setIdentifier(identifier);
         setRegion(Region.fromUri(region));
         setSize(Size.fromUri(size));
@@ -109,9 +109,9 @@ class Parameters {
         try {
             setOutputFormat(OutputFormat.valueOf(format.toUpperCase()));
         } catch (IllegalArgumentException e) {
-            throw new UnsupportedOutputFormatException("Unsupported format. " +
-                    "Available output formats for this image are listed in " +
-                    "the information response.");
+            throw new FormatException("Unsupported format. Available output" +
+                    "formats for this image are listed in the information " +
+                    "response.");
         }
     }
 
@@ -125,7 +125,7 @@ class Parameters {
         return super.equals(obj);
     }
 
-    public Identifier getIdentifier() {
+    public String getIdentifier() {
         return identifier;
     }
 
@@ -163,7 +163,7 @@ class Parameters {
         return toString().hashCode();
     }
 
-    public void setIdentifier(Identifier identifier) {
+    public void setIdentifier(String identifier) {
         this.identifier = identifier;
     }
 
@@ -196,13 +196,14 @@ class Parameters {
      *         additional operations that may need to be performed, such as
      *         overlays, etc.
      */
-    OperationList toOperationList() {
-        OperationList ops = new OperationList(getIdentifier());
-
+    OperationList toOperationList(DelegateProxy delegateProxy) {
+        final OperationList ops = new OperationList(
+                MetaIdentifier.fromString(getIdentifier(), delegateProxy));
         if (!Region.Type.FULL.equals(getRegion().getType())) {
             ops.add(getRegion().toCrop());
         }
-        if (!Size.ScaleMode.MAX.equals(getSize().getScaleMode())) {
+        if (!Size.ScaleMode.FULL.equals(getSize().getScaleMode()) &&
+                !Size.ScaleMode.MAX.equals(getSize().getScaleMode())) {
             ops.add(getSize().toScale());
         }
         ops.add(getRotation().toTranspose());
@@ -211,7 +212,6 @@ class Parameters {
         }
         ops.add(getQuality().toColorTransform());
         ops.add(new Encode(getOutputFormat().toFormat()));
-
         return ops;
     }
 

@@ -19,7 +19,7 @@ import java.nio.file.Path;
 
 import static edu.illinois.library.cantaloupe.test.Assert.HTTPAssert.*;
 import static edu.illinois.library.cantaloupe.test.Assert.PathAssert.*;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Collection of tests shareable between major versions of IIIF Information
@@ -353,8 +353,8 @@ public class InformationResourceTester extends ImageAPIResourceTester {
 
             // Assert that it's been cached.
             assertRecursiveFileCount(cacheDir, 1);
-            DerivativeCache cache = CacheFactory.getDerivativeCache();
-            assertNotNull(cache.getImageInfo(identifier));
+            DerivativeCache cache = CacheFactory.getDerivativeCache().get();
+            assertNotNull(cache.getInfo(identifier));
 
             // Delete the source image.
             Files.delete(sourceImage);
@@ -372,9 +372,9 @@ public class InformationResourceTester extends ImageAPIResourceTester {
             Thread.sleep(1000);
 
             if (purgeMissing) {
-                assertNull(cache.getImageInfo(identifier));
+                assertFalse(cache.getInfo(identifier).isPresent());
             } else {
-                assertNotNull(cache.getImageInfo(identifier));
+                assertTrue(cache.getInfo(identifier).isPresent());
             }
         } finally {
             client.stop();
@@ -394,19 +394,6 @@ public class InformationResourceTester extends ImageAPIResourceTester {
             throws Exception {
         Client client = newClient(uri);
         client.getHeaders().set(AbstractResource.PUBLIC_IDENTIFIER_HEADER, "foxes");
-        try {
-            Response response = client.send();
-            assertEquals(303, response.getStatus());
-            assertTrue(response.getHeaders().getFirstValue("Location").endsWith("/foxes/info.json"));
-        } finally {
-            client.stop();
-        }
-    }
-
-    public void testRedirectToInfoJSONWithDifferentDeprecatedPublicIdentifier(URI uri)
-            throws Exception {
-        Client client = newClient(uri);
-        client.getHeaders().set(AbstractResource.PUBLIC_IDENTIFIER_HEADER_DEPRECATED, "foxes");
         try {
             Response response = client.send();
             assertEquals(303, response.getStatus());

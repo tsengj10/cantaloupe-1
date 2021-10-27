@@ -1,27 +1,18 @@
 package edu.illinois.library.cantaloupe.resource.iiif.v2;
 
-import java.io.IOException;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-import edu.illinois.library.cantaloupe.cache.CacheFacade;
-import edu.illinois.library.cantaloupe.config.Configuration;
-import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.http.Method;
 import edu.illinois.library.cantaloupe.http.Status;
 import edu.illinois.library.cantaloupe.image.Format;
-import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
-import edu.illinois.library.cantaloupe.image.MediaType;
-import edu.illinois.library.cantaloupe.processor.Processor;
-import edu.illinois.library.cantaloupe.processor.ProcessorConnector;
-import edu.illinois.library.cantaloupe.processor.ProcessorFactory;
+import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
 import edu.illinois.library.cantaloupe.resource.JacksonRepresentation;
 import edu.illinois.library.cantaloupe.resource.ResourceException;
 import edu.illinois.library.cantaloupe.resource.Route;
-import edu.illinois.library.cantaloupe.source.Source;
-import edu.illinois.library.cantaloupe.source.SourceFactory;
+import edu.illinois.library.cantaloupe.resource.InformationRequestHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,93 +48,43 @@ public class InformationResource extends IIIF2Resource {
         if (redirectToNormalizedScaleConstraint()) {
             return;
         }
-        try {
-            // The logic here is somewhat convoluted. See the method
-            // documentation for more information.
-            if (!authorize()) {
-                return;
-            }
-        } catch (ResourceException e) {
-            if (Status.FORBIDDEN.equals(e.getStatus())) {
-                throw e;
-            }
-            // Continue anyway. All we needed was to set the response status:
-            // https://iiif.io/api/auth/1.0/#interaction-with-access-controlled-resources
-        }
+        // TODO: we are supposed to get the available output formats from the
+        // processor, but the control flow may not lead to a processor ever
+        // being obtained.
+        final Set<Format> availableOutputFormats =
+                new HashSet<>(ImageWriterFactory.supportedFormats());
 
-        final Configuration config = Configuration.getInstance();
-        final Identifier identifier = getIdentifier();
-        final CacheFacade cacheFacade = new CacheFacade();
-
-        // If we are using a cache, and don't need to resolve first, and the
-        // cache contains an info matching the request, skip all the setup and
-        // just return the cached info.
-        if (!isBypassingCache() && !isResolvingFirst()) {
-            try {
-                Info info = cacheFacade.getInfo(identifier);
-                if (info != null) {
-                    // The source format will be null or UNKNOWN if the info was
-                    // serialized in version < 3.4.
-                    final Format format = info.getSourceFormat();
-                    if (format != null && !Format.UNKNOWN.equals(format)) {
-                        final Processor processor = new ProcessorFactory().
-                                newProcessor(format);
-                        addHeaders();
-                        newRepresentation(info, processor)
-                                .write(getResponse().getOutputStream());
-                        return;
+        class CustomCallback implements InformationRequestHandler.Callback {
+            @Override
+            public boolean authorize() throws Exception {
+                try {
+                    // The logic here is somewhat convoluted. See the method
+                    // documentation for more information.
+                    return InformationResource.this.preAuthorize();
+                } catch (ResourceException e) {
+                    if (Status.FORBIDDEN.equals(e.getStatus())) {
+                        throw e;
                     }
                 }
-            } catch (IOException e) {
-                // Don't rethrow -- it's still possible to service the request.
-                LOGGER.error(e.getMessage());
+                return false;
+            }
+            @Override
+            public void knowAvailableOutputFormats(Set<Format> formats) {
+                availableOutputFormats.addAll(formats);
             }
         }
 
-        final Source source = new SourceFactory().newSource(
-                identifier, getDelegateProxy());
-
-        // If we are resolving first, or if the source image is not present in
-        // the source cache (if enabled), check access to it in preparation for
-        // retrieval.
-        final Path sourceImage = cacheFacade.getSourceCacheFile(identifier);
-        if (sourceImage == null || isResolvingFirst()) {
-            try {
-                source.checkAccess();
-            } catch (NoSuchFileException e) { // this needs to be rethrown!
-                if (config.getBoolean(Key.CACHE_SERVER_PURGE_MISSING, false)) {
-                    // If the image was not found, purge it from the cache.
-                    cacheFacade.purgeAsync(identifier);
-                }
-                throw e;
-            }
-        }
-
-        // Get the format of the source image.
-        // If we are not resolving first, and there is a hit in the source
-        // cache, read the format from the source-cached-file, as we will
-        // expect source cache access to be more efficient.
-        // Otherwise, read it from the source.
-        Format format = Format.UNKNOWN;
-        if (!isResolvingFirst() && sourceImage != null) {
-            List<MediaType> mediaTypes = MediaType.detectMediaTypes(sourceImage);
-            if (!mediaTypes.isEmpty()) {
-                format = mediaTypes.get(0).toFormat();
-            }
-        } else {
-            format = source.getFormat();
-        }
-
-        // Obtain an instance of the processor assigned to that format.
-        try (Processor processor = new ProcessorFactory().newProcessor(format)) {
-            // Connect it to the source.
-            tempFileFuture = new ProcessorConnector().connect(
-                    source, processor, identifier, format);
-
-            final Info info = getOrReadInfo(identifier, processor);
-
+        try (InformationRequestHandler handler = InformationRequestHandler.builder()
+                .withIdentifier(getMetaIdentifier().getIdentifier())
+                .withBypassingCache(isBypassingCache())
+                .withBypassingCacheRead(isBypassingCacheRead())
+                .withDelegateProxy(getDelegateProxy())
+                .withRequestContext(getRequestContext())
+                .withCallback(new CustomCallback())
+                .build()) {
+            Info info = handler.handle();
             addHeaders();
-            newRepresentation(info, processor)
+            newRepresentation(info, availableOutputFormats)
                     .write(getResponse().getOutputStream());
         }
     }
@@ -153,9 +94,9 @@ public class InformationResource extends IIIF2Resource {
     }
 
     /**
-     * @return Full image URI corresponding to the given identifier, respecting
-     *         the {@literal X-Forwarded-*} and
-     *         {@link #PUBLIC_IDENTIFIER_HEADER} reverse proxy headers.
+     * @return Image URI corresponding to the given identifier, respecting the
+     *         {@code X-Forwarded-*} and {@link #PUBLIC_IDENTIFIER_HEADER}
+     *         reverse proxy headers.
      */
     private String getImageURI() {
         return getPublicRootReference() + Route.IIIF_2_PATH + "/" +
@@ -177,21 +118,17 @@ public class InformationResource extends IIIF2Resource {
     }
 
     private JacksonRepresentation newRepresentation(Info info,
-                                                    Processor processor) {
-        final ImageInfoFactory factory = new ImageInfoFactory(
-                processor.getSupportedFeatures(),
-                processor.getSupportedIIIF2Qualities(),
-                processor.getAvailableOutputFormats());
+                                                    Set<Format> availableOutputFormats) {
+        final ImageInfoFactory factory = new ImageInfoFactory();
         factory.setDelegateProxy(getDelegateProxy());
 
         final ImageInfo<String, Object> imageInfo = factory.newImageInfo(
-                getImageURI(), info, getPageIndex(), getScaleConstraint());
+                availableOutputFormats,
+                getImageURI(),
+                info,
+                getPageIndex(),
+                getMetaIdentifier().getScaleConstraint());
         return new JacksonRepresentation(imageInfo);
-    }
-
-    private boolean isResolvingFirst() {
-        return Configuration.getInstance().
-                getBoolean(Key.CACHE_SERVER_RESOLVE_FIRST, true);
     }
 
 }

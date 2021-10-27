@@ -1,8 +1,5 @@
 package edu.illinois.library.cantaloupe.resource.iiif.v2;
 
-import edu.illinois.library.cantaloupe.resource.iiif.Feature;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
-
 /**
  * Encapsulates an IIIF "feature" that is application-dependent.
  *

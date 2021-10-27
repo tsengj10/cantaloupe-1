@@ -2,9 +2,12 @@ package edu.illinois.library.cantaloupe.config;
 
 import edu.illinois.library.cantaloupe.async.ThreadPool;
 import edu.illinois.library.cantaloupe.util.FilesystemWatcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -18,6 +21,9 @@ public final class ConfigurationFileWatcher {
      * changed.
      */
     private static class FileChangeHandlerRunner implements Runnable {
+
+        private static final Logger LOGGER =
+                LoggerFactory.getLogger(FileChangeHandlerRunner.class);
 
         private Path file;
         private FilesystemWatcher filesystemWatcher;
@@ -33,7 +39,7 @@ public final class ConfigurationFileWatcher {
                 filesystemWatcher = new FilesystemWatcher(path, new FileChangeHandler());
                 filesystemWatcher.start();
             } catch (IOException e) {
-                System.err.println("FileChangeHandlerRunner.run(): " + e.getMessage());
+                LOGGER.error("run(): {}", e.getMessage());
             }
         }
 
@@ -55,10 +61,13 @@ public final class ConfigurationFileWatcher {
                 .filter(c -> c instanceof FileConfiguration)
                 .map(c -> (FileConfiguration) c)
                 .forEach(c -> {
-                    FileChangeHandlerRunner runner =
-                            new FileChangeHandlerRunner(c.getFile());
-                    CHANGE_HANDLERS.add(runner);
-                    ThreadPool.getInstance().submit(runner, ThreadPool.Priority.LOW);
+                    Optional<Path> file = c.getFile();
+                    if (file.isPresent()) {
+                        FileChangeHandlerRunner runner =
+                                new FileChangeHandlerRunner(file.get());
+                        CHANGE_HANDLERS.add(runner);
+                        ThreadPool.getInstance().submit(runner, ThreadPool.Priority.LOW);
+                    }
                 });
     }
 

@@ -2,26 +2,18 @@ package edu.illinois.library.cantaloupe.processor;
 
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Info;
-import edu.illinois.library.cantaloupe.operation.Encode;
-import edu.illinois.library.cantaloupe.operation.MetadataCopy;
-import edu.illinois.library.cantaloupe.operation.OperationList;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.EnumSet;
-import java.util.Set;
-
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class KakaduNativeProcessorTest extends AbstractProcessorTest {
 
     private KakaduNativeProcessor instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
@@ -30,105 +22,83 @@ public class KakaduNativeProcessorTest extends AbstractProcessorTest {
         instance = newInstance();
     }
 
+    @AfterEach
+    public void tearDown() throws Exception {
+        super.tearDown();
+        instance.close();
+    }
+
     @Override
     protected KakaduNativeProcessor newInstance() {
         KakaduNativeProcessor proc = new KakaduNativeProcessor();
         try {
-            proc.setSourceFormat(Format.JP2);
-        } catch (UnsupportedSourceFormatException e) {
+            proc.setSourceFormat(Format.get("jp2"));
+        } catch (SourceFormatException e) {
             fail("Huge bug");
         }
         return proc;
     }
 
     @Test
-    public void testGetInitializationErrorWithNoException() {
-        assertNull(instance.getInitializationError());
-    }
-
-    @Test
-    public void testIsSeeking() {
+    void testIsSeeking() {
         assertTrue(instance.isSeeking());
     }
 
     @Test
-    public void testProcessWithMetadataCopy() throws Exception {
-        try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
-            instance.setSourceFormat(Format.JP2);
-            instance.setSourceFile(TestUtil.getImage("jp2-xmp.jp2"));
-
-            OperationList opList = new OperationList(
-                    new MetadataCopy(),
-                    new Encode(Format.JPG));
-            Info info = instance.readInfo();
-
-            instance.process(opList, info, os);
-
-            String str = new String(os.toByteArray(), StandardCharsets.UTF_8);
-            assertTrue(str.contains("<rdf:RDF"));
-        }
+    void testGetInitializationErrorWithNoException() {
+        assertNull(instance.getInitializationError());
     }
 
     @Test
-    public void testProcessWithoutMetadataCopy() throws Exception {
-        try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
-            instance.setSourceFormat(Format.JP2);
-            instance.setSourceFile(TestUtil.getImage("jp2-xmp.jp2"));
-
-            OperationList opList = new OperationList(new Encode(Format.JPG));
-            Info info = instance.readInfo();
-
-            instance.process(opList, info, os);
-
-            String str = new String(os.toByteArray(), StandardCharsets.UTF_8);
-            assertFalse(str.contains("<rdf:RDF"));
-        }
-    }
-
-    @Test
-    public void testReadImageInfoWithUntiledImage() throws Exception {
+    void testReadInfoWithUntiledImage() throws Exception {
         instance.setSourceFile(TestUtil.getImage("jp2-5res-rgb-64x56x8-monotiled-lossy.jp2"));
         Info expectedInfo = Info.builder()
                 .withSize(64, 56)
                 .withTileSize(64, 56)
-                .withFormat(Format.JP2)
+                .withFormat(Format.get("jp2"))
                 .withNumResolutions(5)
                 .build();
         assertEquals(expectedInfo, instance.readInfo());
     }
 
     @Test
-    public void testReadImageInfoWithTiledImage() throws Exception {
+    void testReadInfoWithTiledImage() throws Exception {
         instance.setSourceFile(TestUtil.getImage("jp2-6res-rgb-64x56x8-multitiled-lossy.jp2"));
         Info expectedInfo = Info.builder()
                 .withSize(64, 56)
                 .withTileSize(32, 28)
-                .withFormat(Format.JP2)
+                .withFormat(Format.get("jp2"))
                 .withNumResolutions(6)
                 .build();
         assertEquals(expectedInfo, instance.readInfo());
     }
 
     @Test
-    public void testGetSupportedFeatures() throws Exception {
-        instance.setSourceFormat(getAnySupportedSourceFormat(instance));
+    void testReadInfoIPTCAwareness() throws Exception {
+        instance.setSourceFile(TestUtil.getImage("jp2-iptc.jp2"));
+        Info info = instance.readInfo();
+        assertTrue(info.getMetadata().getIPTC().isPresent());
+    }
 
-        Set<ProcessorFeature> expectedFeatures = EnumSet.of(
-                ProcessorFeature.MIRRORING,
-                ProcessorFeature.REGION_BY_PERCENT,
-                ProcessorFeature.REGION_BY_PIXELS,
-                ProcessorFeature.REGION_SQUARE,
-                ProcessorFeature.ROTATION_ARBITRARY,
-                ProcessorFeature.ROTATION_BY_90S,
-                ProcessorFeature.SIZE_ABOVE_FULL,
-                ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_HEIGHT,
-                ProcessorFeature.SIZE_BY_PERCENT,
-                ProcessorFeature.SIZE_BY_WIDTH,
-                ProcessorFeature.SIZE_BY_WIDTH_HEIGHT);
-        assertEquals(expectedFeatures, instance.getSupportedFeatures());
+    @Test
+    void testReadInfoXMPAwareness() throws Exception {
+        instance.setSourceFile(TestUtil.getImage("jp2-xmp.jp2"));
+        Info info = instance.readInfo();
+        assertTrue(info.getMetadata().getXMP().isPresent());
+    }
+
+    @Test
+    void testSupportsSourceFormatWithSupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertTrue(instance.supportsSourceFormat(Format.get("jp2")));
+        }
+    }
+
+    @Test
+    void testSupportsSourceFormatWithUnsupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertFalse(instance.supportsSourceFormat(Format.get("gif")));
+        }
     }
 
 }

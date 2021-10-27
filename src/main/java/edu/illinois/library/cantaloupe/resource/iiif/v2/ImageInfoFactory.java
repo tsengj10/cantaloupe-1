@@ -5,12 +5,12 @@ import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Info;
+import edu.illinois.library.cantaloupe.image.Metadata;
+import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.processor.Processor;
-import edu.illinois.library.cantaloupe.resource.iiif.Feature;
 import edu.illinois.library.cantaloupe.resource.iiif.ImageInfoUtil;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,43 +48,30 @@ final class ImageInfoFactory {
                             ServiceFeature.JSON_LD_MEDIA_TYPE,
                             ServiceFeature.PROFILE_LINK_HEADER));
 
-    private Set<ProcessorFeature> processorFeatures;
-    private Set<Quality> processorQualities;
-    private Set<Format> processorOutputFormats;
     private DelegateProxy delegateProxy;
     private double maxScale;
     private int maxPixels, minSize, minTileSize;
 
-    /**
-     * @param processorFeatures      Return value of {@link
-     *                               Processor#getSupportedFeatures()}.
-     * @param processorQualities     Return value of {@link
-     *                               Processor#getSupportedIIIF2Qualities()}.
-     * @param processorOutputFormats Return value of {@link
-     *                               Processor#getAvailableOutputFormats()}.
-     */
-    ImageInfoFactory(final Set<ProcessorFeature> processorFeatures,
-                     final Set<Quality> processorQualities,
-                     final Set<Format> processorOutputFormats) {
-        Configuration config = Configuration.getInstance();
-        maxPixels            = config.getInt(Key.MAX_PIXELS, 0);
-        maxScale             = config.getDouble(Key.MAX_SCALE, Double.MAX_VALUE);
-        minSize              = config.getInt(Key.IIIF_MIN_SIZE, DEFAULT_MIN_SIZE);
-        minTileSize          = config.getInt(Key.IIIF_MIN_TILE_SIZE, DEFAULT_MIN_TILE_SIZE);
-
-        this.processorFeatures = processorFeatures;
-        this.processorQualities = processorQualities;
-        this.processorOutputFormats = processorOutputFormats;
+    ImageInfoFactory() {
+        var config  = Configuration.getInstance();
+        maxPixels   = config.getInt(Key.MAX_PIXELS, 0);
+        maxScale    = config.getDouble(Key.MAX_SCALE, Double.MAX_VALUE);
+        minSize     = config.getInt(Key.IIIF_MIN_SIZE, DEFAULT_MIN_SIZE);
+        minTileSize = config.getInt(Key.IIIF_MIN_TILE_SIZE, DEFAULT_MIN_TILE_SIZE);
     }
 
     /**
-     * @param imageURI        May be {@literal null}.
-     * @param info            Info describing the image.
-     * @param infoImageIndex  Index of the full/main image in the {@link Info}
-     *                        argument's {@link Info#getImages()} list.
-     * @param scaleConstraint May be {@literal null}.
+     * @param processorOutputFormats Return value of {@link
+     *                               Processor#getAvailableOutputFormats()}.
+     * @param imageURI               May be {@code null}.
+     * @param info                   Instance describing the image.
+     * @param infoImageIndex         Index of the full/main image in the {@link
+     *                               Info} argument's {@link Info#getImages()}
+     *                               list.
+     * @param scaleConstraint        May be {@code null}.
      */
-    ImageInfo<String,Object> newImageInfo(final String imageURI,
+    ImageInfo<String,Object> newImageInfo(final Set<Format> processorOutputFormats,
+                                          final String imageURI,
                                           final Info info,
                                           final int infoImageIndex,
                                           ScaleConstraint scaleConstraint) {
@@ -93,7 +80,11 @@ final class ImageInfoFactory {
         }
         // We want to use the orientation-aware full size, which takes the
         // embedded orientation into account.
-        final Dimension virtualSize = info.getOrientationSize(infoImageIndex);
+        final Metadata metadata = info.getMetadata();
+        final Orientation orientation = (metadata != null) ?
+                metadata.getOrientation() : Orientation.ROTATE_0;
+        final Dimension virtualSize =
+                orientation.adjustedSize(info.getSize(infoImageIndex));
         virtualSize.scale(scaleConstraint.getRational().doubleValue());
 
         // Create a Map instance, which will eventually be serialized to JSON
@@ -121,7 +112,7 @@ final class ImageInfoFactory {
         final Set<Dimension> uniqueTileSizes = new HashSet<>();
 
         // Find a tile width and height. If the image is not tiled,
-        // calculate a tile size close to IIIF_MIN_TILE_SIZE pixels.
+        // calculate a tile size close to minTileSize pixels.
         // Otherwise, use the smallest multiple of the tile size above that
         // of image resolution 0.
         final List<ImageInfo.Tile> tiles = new ArrayList<>();
@@ -129,7 +120,8 @@ final class ImageInfoFactory {
 
         info.getImages().forEach(image ->
                 uniqueTileSizes.add(ImageInfoUtil.getTileSize(
-                        virtualSize, image.getOrientationTileSize(),
+                        virtualSize,
+                        orientation.adjustedSize(image.getTileSize()),
                         minTileSize)));
 
         for (Dimension uniqueTileSize : uniqueTileSizes) {
@@ -148,8 +140,6 @@ final class ImageInfoFactory {
 
         final String complianceUri = ComplianceLevel.getLevel(
                 SUPPORTED_SERVICE_FEATURES,
-                processorFeatures,
-                processorQualities,
                 processorOutputFormats).getUri();
         profile.add(complianceUri);
 
@@ -172,22 +162,20 @@ final class ImageInfoFactory {
 
         // qualities
         final Set<String> qualityStrings = new HashSet<>();
-        for (Quality quality : processorQualities) {
+        for (Quality quality : Quality.values()) {
             qualityStrings.add(quality.toString().toLowerCase());
         }
         profileMap.put("qualities", qualityStrings);
 
         // supports
         final Set<String> featureStrings = new HashSet<>();
-        for (Feature pFeature : processorFeatures) {
+        for (Feature pFeature : ProcessorFeature.values()) {
             // sizeAboveFull should not be available if the info is being used
             // for a virtual scale-constrained version, or if upscaling is
             // disallowed in the configuration.
-            if (ProcessorFeature.SIZE_ABOVE_FULL.equals(pFeature)) {
-                if (scaleConstraint.hasEffect() ||
-                        (ProcessorFeature.SIZE_ABOVE_FULL.equals(pFeature) && maxScale <= 1)) {
-                    continue;
-                }
+            if (ProcessorFeature.SIZE_ABOVE_FULL.equals(pFeature) &&
+                    (scaleConstraint.hasEffect() || maxScale <= 1)) {
+                continue;
             }
             featureStrings.add(pFeature.getName());
         }
@@ -200,7 +188,7 @@ final class ImageInfoFactory {
         if (delegateProxy != null) {
             try {
                 final Map<String, Object> keyMap =
-                        delegateProxy.getExtraIIIFInformationResponseKeys();
+                        delegateProxy.getExtraIIIF2InformationResponseKeys();
                 responseInfo.putAll(keyMap);
             } catch (ScriptException e) {
                 LOGGER.error(e.getMessage());
@@ -245,8 +233,7 @@ final class ImageInfoFactory {
      *                 #maxScale}.
      */
     private int getEffectiveMaxPixels(Dimension fullSize) {
-        final double area = fullSize.width() * fullSize.height();
-        return (int) Math.min(area * maxScale, maxPixels);
+        return (int) Math.min(fullSize.area() * maxScale, maxPixels);
     }
 
     void setDelegateProxy(DelegateProxy proxy) {
@@ -254,7 +241,7 @@ final class ImageInfoFactory {
     }
 
     /**
-     * @param maxPixels Maximum number of pixels that will be used in {@literal
+     * @param maxPixels Maximum number of pixels that will be used in {@code
      *                  sizes} keys.
      */
     void setMaxPixels(int maxPixels) {
@@ -269,7 +256,7 @@ final class ImageInfoFactory {
     }
 
     /**
-     * @param minSize Minimum size that will be used in {@literal sizes} keys.
+     * @param minSize Minimum size that will be used in {@code sizes} keys.
      */
     void setMinSize(int minSize) {
         this.minSize = minSize;

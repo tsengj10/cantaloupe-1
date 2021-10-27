@@ -1,36 +1,194 @@
 package edu.illinois.library.cantaloupe.image;
 
+import edu.illinois.library.cantaloupe.Application;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * This class is divided into two sections: one for Info and one for
- * Info.Image.
- */
-public class InfoTest extends BaseTest {
+class InfoTest extends BaseTest {
+
+    /*********************** Builder tests **************************/
+
+    @Nested
+    public class BuilderTest {
+
+        @Test
+        void testWithFormat() {
+            Info info = Info.builder().withFormat(Format.get("png")).build();
+            assertEquals(Format.get("png"), info.getSourceFormat());
+        }
+
+        @Test
+        void testWithIdentifier() {
+            Identifier identifier = new Identifier("cats");
+            Info info = Info.builder().withIdentifier(identifier).build();
+            assertEquals(identifier, info.getIdentifier());
+        }
+
+        @Test
+        void testWithMetadata() {
+            Metadata metadata = new Metadata();
+            Info info = Info.builder().withMetadata(metadata).build();
+            assertEquals(metadata, info.getMetadata());
+        }
+
+        @Test
+        void testWithNumResolutions() {
+            Info info = Info.builder().withNumResolutions(5).build();
+            assertEquals(5, info.getNumResolutions());
+        }
+
+        @Test
+        void testWithSize1() {
+            Dimension size = new Dimension(45, 50);
+            Info info = Info.builder().withSize(size).build();
+            assertEquals(size, info.getSize());
+        }
+
+        @Test
+        void testWithSize2() {
+            int width = 45;
+            int height = 50;
+            Info info = Info.builder().withSize(width, height).build();
+            assertEquals(new Dimension(45, 50), info.getSize());
+        }
+
+        @Test
+        void testWithTileSize1() {
+            Dimension size = new Dimension(45, 50);
+            Info info = Info.builder().withTileSize(size).build();
+            assertEquals(size, info.getImages().get(0).getTileSize());
+        }
+
+        @Test
+        void testWithTileSize2() {
+            int width = 45;
+            int height = 50;
+            Info info = Info.builder().withTileSize(width, height).build();
+            assertEquals(new Dimension(width, height),
+                    info.getImages().get(0).getTileSize());
+        }
+
+    }
+
+    /********************* Info.Image tests *************************/
+
+    @Nested
+    public class InfoImageTest {
+
+        @Test
+        void testConstructor() {
+            Info.Image image = new Info.Image();
+            assertEquals(new Dimension(0, 0), image.getSize());
+            assertEquals(new Dimension(0, 0), image.getTileSize());
+        }
+
+        @Test
+        void testEqualsWithEqualInstances() {
+            Info.Image image1 = new Info.Image();
+            image1.setSize(new Dimension(100, 50));
+            image1.setTileSize(new Dimension(50, 25));
+
+            Info.Image image2 = new Info.Image();
+            image2.setSize(image1.getSize());
+            image2.setTileSize(image1.getTileSize());
+
+            assertEquals(image1, image2);
+        }
+
+        @Test
+        void testEqualsWithUnequalSizes() {
+            Info.Image image1 = new Info.Image();
+            image1.setSize(new Dimension(100, 50));
+            image1.setTileSize(new Dimension(50, 25));
+
+            Info.Image image2 = new Info.Image();
+            image2.setSize(new Dimension(100, 49));
+            image2.setTileSize(image1.getTileSize());
+
+            assertNotEquals(image1, image2);
+        }
+
+        @Test
+        void testEqualsWithUnequalTileSizes() {
+            Info.Image image1 = new Info.Image();
+            image1.setSize(new Dimension(100, 50));
+            image1.setTileSize(new Dimension(50, 25));
+
+            Info.Image image2 = new Info.Image();
+            image2.setSize(image1.getSize());
+            image2.setTileSize(new Dimension(50, 24));
+
+            assertNotEquals(image1, image2);
+        }
+
+        @Test
+        void testHashCodeWithEqualInstances() {
+            Info.Image image1 = new Info.Image();
+            image1.setSize(new Dimension(100, 50));
+            image1.setTileSize(new Dimension(50, 25));
+
+            Info.Image image2 = new Info.Image();
+            image2.setSize(image1.getSize());
+            image2.setTileSize(image1.getTileSize());
+
+            assertEquals(image1.hashCode(), image2.hashCode());
+        }
+
+        @Test
+        void testHashCodeWithUnequalSizes() {
+            Info.Image image1 = new Info.Image();
+            image1.setSize(new Dimension(100, 50));
+            image1.setTileSize(new Dimension(50, 25));
+
+            Info.Image image2 = new Info.Image();
+            image2.setSize(new Dimension(100, 49));
+            image2.setTileSize(image1.getTileSize());
+
+            assertNotEquals(image1.hashCode(), image2.hashCode());
+        }
+
+        @Test
+        void testHashCodeWithUnequalTileSizes() {
+            Info.Image image1 = new Info.Image();
+            image1.setSize(new Dimension(100, 50));
+            image1.setTileSize(new Dimension(50, 25));
+
+            Info.Image image2 = new Info.Image();
+            image2.setSize(image1.getSize());
+            image2.setTileSize(new Dimension(50, 24));
+
+            assertNotEquals(image1.hashCode(), image2.hashCode());
+        }
+
+    }
 
     private Info instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
+
+        final Metadata metadata = new Metadata();
+        metadata.setXMP("<cats/>");
+
         instance = Info.builder()
                 .withIdentifier(new Identifier("cats"))
                 .withSize(100, 80)
                 .withTileSize(50, 40)
-                .withFormat(Format.JPG)
+                .withFormat(Format.get("jpg"))
                 .withNumResolutions(3)
-                .withOrientation(Orientation.ROTATE_270)
+                .withMetadata(metadata)
                 .build();
     }
 
@@ -39,21 +197,28 @@ public class InfoTest extends BaseTest {
     /* fromJSON(Path) */
 
     @Test
-    public void testFromJSONWithPath() throws Exception {
-        Path tempFile = Files.createTempFile("test", "json");
+    void testFromJSONWithPath() throws Exception {
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("test", "json");
 
-        // Serialize the instance to JSON and write it to a file.
-        String json = instance.toJSON();
-        Files.write(tempFile, json.getBytes("UTF-8"));
+            // Serialize the instance to JSON and write it to a file.
+            String json = instance.toJSON();
+            Files.write(tempFile, json.getBytes(StandardCharsets.UTF_8));
 
-        Info info = Info.fromJSON(tempFile);
-        assertEquals(info.toString(), instance.toString());
+            Info info = Info.fromJSON(tempFile);
+            assertEquals(info.toString(), instance.toString());
+        } finally {
+            if (tempFile != null) {
+                Files.deleteIfExists(tempFile);
+            }
+        }
     }
 
     /* fromJSON(InputStream) */
 
     @Test
-    public void testFromJSONWithInputStream() throws Exception {
+    void testFromJSONWithInputStream() throws Exception {
         String json = instance.toJSON();
         InputStream inputStream = new ByteArrayInputStream(json.getBytes());
 
@@ -64,173 +229,369 @@ public class InfoTest extends BaseTest {
     /* fromJSON(String) */
 
     @Test
-    public void testFromJSONWithString() throws Exception {
+    void testFromJSONWithString() throws Exception {
         String json = instance.toJSON();
         Info info = Info.fromJSON(json);
         assertEquals(info.toString(), instance.toString());
     }
 
+    /* fromJSON() serialization */
+
+    @Test
+    void testFromJSONWithVersion2Serialization() throws Exception {
+        String v34json = "{\n" +
+                "  \"mediaType\": \"image/jpeg\",\n" +
+                "  \"images\": [\n" +
+                "    {\n" +
+                "      \"width\": 100,\n" +
+                "      \"height\": 80,\n" +
+                "      \"tileWidth\": 50,\n" +
+                "      \"tileHeight\": 40\n" +
+                "    }\n" +
+                "  ]\n" +
+                "}";
+        Info actual = Info.fromJSON(v34json);
+        Info expected = Info.builder()
+                .withFormat(Format.get("jpg"))
+                .withSize(100, 80)
+                .withTileSize(50, 40)
+                .build();
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void testFromJSONWithVersion3Serialization() throws Exception {
+        String v4json = "{\n" +
+                "  \"identifier\": \"cats\",\n" +
+                "  \"mediaType\": \"image/jpeg\",\n" +
+                "  \"numResolutions\": 3,\n" +
+                "  \"images\": [\n" +
+                "    {\n" +
+                "      \"width\": 100,\n" +
+                "      \"height\": 80,\n" +
+                "      \"tileWidth\": 50,\n" +
+                "      \"tileHeight\": 40,\n" +
+                "      \"orientation\": 1\n" +
+                "    }\n" +
+                "  ]\n" +
+                "}";
+        Info actual = Info.fromJSON(v4json);
+        Info expected = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(3)
+                .withSize(100, 80)
+                .withTileSize(50, 40)
+                .build();
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void testFromJSONWithVersion4Serialization() throws Exception {
+        String v5json = "{\n" +
+                "  \"applicationVersion\": \"5.0\",\n" +
+                "  \"serializationVersion\": 4,\n" +
+                "  \"identifier\": \"cats\",\n" +
+                "  \"mediaType\": \"image/jpeg\",\n" +
+                "  \"numResolutions\": 3,\n" +
+                "  \"images\": [\n" +
+                "    {\n" +
+                "      \"width\": 100,\n" +
+                "      \"height\": 80,\n" +
+                "      \"tileWidth\": 50,\n" +
+                "      \"tileHeight\": 40\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"metadata\": {\n" +
+                "    \"xmp\": \"<cats/>\"\n" +
+                "  }\n" +
+                "}";
+        Metadata metadata = new Metadata();
+        metadata.setXMP("<cats/>");
+        Info actual = Info.fromJSON(v5json);
+        Info expected = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(3)
+                .withMetadata(metadata)
+                .withSize(100, 80)
+                .withTileSize(50, 40)
+                .build();
+        expected.setApplicationVersion("5.0");
+        assertEquals(expected, actual);
+    }
+
     /* Info() */
 
     @Test
-    public void testConstructor() {
+    void testConstructor() {
         instance = new Info();
         assertEquals(1, instance.getImages().size());
+        assertNotNull(instance.getMetadata());
     }
 
     /* equals() */
 
     @Test
-    public void testEqualsWithEqualInstances() {
+    void testEqualsWithEqualInstances() {
         Info info2 = Info.builder()
-                .withIdentifier(new Identifier("cats"))
-                .withSize(100, 80)
-                .withTileSize(50, 40)
-                .withOrientation(Orientation.ROTATE_270)
-                .withNumResolutions(3)
-                .withFormat(Format.JPG)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertTrue(instance.equals(info2));
+        assertEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentIdentifiers() {
+    void testEqualsWithDifferentApplicationVersions() {
         Info info2 = Info.builder()
-                .withIdentifier(new Identifier("dogs"))
-                .withSize(100, 80)
-                .withTileSize(50, 40)
-                .withOrientation(Orientation.ROTATE_270)
-                .withNumResolutions(3)
-                .withFormat(Format.JPG)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertFalse(instance.equals(info2));
+        info2.setApplicationVersion("99.0");
+        assertNotEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentWidths() {
+    void testEqualsWithDifferentSerializationVersions() {
         Info info2 = Info.builder()
-                .withSize(99, 80)
-                .withTileSize(50, 40)
-                .withOrientation(Orientation.ROTATE_270)
-                .withNumResolutions(3)
-                .withFormat(Format.JPG)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertFalse(instance.equals(info2));
+        info2.setSerializationVersion(2);
+        assertNotEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentHeights() {
+    void testEqualsWithDifferentIdentifiers() {
         Info info2 = Info.builder()
-                .withSize(100, 79)
-                .withTileSize(50, 40)
-                .withOrientation(Orientation.ROTATE_270)
-                .withNumResolutions(3)
-                .withFormat(Format.JPG)
+                .withIdentifier(new Identifier("mules"))
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertFalse(instance.equals(info2));
+        assertNotEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentTileWidths() {
+    void testEqualsWithDifferentWidths() {
         Info info2 = Info.builder()
-                .withSize(100, 80)
-                .withTileSize(49, 40)
-                .withOrientation(Orientation.ROTATE_270)
-                .withNumResolutions(3)
-                .withFormat(Format.JPG)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(999, instance.getSize().intHeight())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertFalse(instance.equals(info2));
+        assertNotEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentTileHeights() {
+    void testEqualsWithDifferentHeights() {
         Info info2 = Info.builder()
-                .withSize(100, 80)
-                .withTileSize(50, 39)
-                .withOrientation(Orientation.ROTATE_270)
-                .withNumResolutions(3)
-                .withFormat(Format.JPG)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize().intWidth(), 999)
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertFalse(instance.equals(info2));
+        assertNotEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentOrientations() {
+    void testEqualsWithDifferentTileWidths() {
         Info info2 = Info.builder()
-                .withSize(100, 80)
-                .withTileSize(50, 40)
-                .withOrientation(Orientation.ROTATE_180)
-                .withNumResolutions(3)
-                .withFormat(Format.JPG)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(999, instance.getImages().get(0).getTileSize().intHeight())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertFalse(instance.equals(info2));
+        assertNotEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentNumResolutions() {
+    void testEqualsWithDifferentTileHeights() {
         Info info2 = Info.builder()
-                .withSize(100, 80)
-                .withTileSize(50, 40)
-                .withOrientation(Orientation.ROTATE_90)
-                .withNumResolutions(2)
-                .withFormat(Format.JPG)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize().intWidth(), 999)
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
                 .build();
-        assertFalse(instance.equals(info2));
+        assertNotEquals(instance, info2);
     }
 
     @Test
-    public void testEqualsWithDifferentFormats() {
+    void testEqualsWithDifferentMetadatas() {
+        Metadata metadata2 = new Metadata();
+        metadata2.setXMP("<dogs/>");
+
         Info info2 = Info.builder()
-                .withSize(100, 80)
-                .withTileSize(50, 40)
-                .withOrientation(Orientation.ROTATE_90)
-                .withNumResolutions(3)
-                .withFormat(Format.GIF)
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(metadata2)
                 .build();
-        assertFalse(instance.equals(info2));
+        assertNotEquals(instance, info2);
+    }
+
+    @Test
+    void testEqualsWithDifferentNumResolutions() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions() + 1)
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance, info2);
+    }
+
+    @Test
+    void testEqualsWithDifferentFormats() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(Format.get("gif"))
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance, info2);
+    }
+
+    /* getApplicationVersion() */
+
+    @Test
+    void testGetApplicationVersion() {
+        assertEquals(Application.getVersion(),
+                instance.getApplicationVersion());
     }
 
     /* getImages() */
 
     @Test
-    public void testGetImages() {
+    void testGetImages() {
         assertEquals(1, instance.getImages().size());
+    }
+
+    /* getMetadata() */
+
+    @Test
+    void testGetMetadata() {
+        assertEquals("<cats/>", instance.getMetadata().getXMP().orElseThrow());
+    }
+
+    /* getNumPages() */
+
+    @Test
+    void testGetNumPagesWithSingleResolutionImage() {
+        instance = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withSize(100, 80)
+                .withTileSize(50, 40)
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(1)
+                .build();
+        assertEquals(1, instance.getNumPages());
+    }
+
+    @Test
+    void testGetNumPagesWithPyramidalImage() {
+        instance = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withSize(1000, 800)
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(6)
+                .build();
+        // level 2
+        Info.Image image = new Info.Image();
+        image.setSize(new Dimension(500, 400));
+        instance.getImages().add(image);
+        // level 3
+        image = new Info.Image();
+        image.setSize(new Dimension(250, 200));
+        instance.getImages().add(image);
+        // level 4
+        image = new Info.Image();
+        image.setSize(new Dimension(125, 100));
+        instance.getImages().add(image);
+        // level 5
+        image = new Info.Image();
+        image.setSize(new Dimension(63, 50));
+        instance.getImages().add(image);
+        // level 6
+        image = new Info.Image();
+        image.setSize(new Dimension(32, 25));
+        instance.getImages().add(image);
+
+        assertEquals(1, instance.getNumPages());
+    }
+
+    @Test
+    void testGetNumPagesWithNonPyramidalMultiImageImage() {
+        instance = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withSize(1000, 800)
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(1)
+                .build();
+        Info.Image image = new Info.Image();
+        image.setSize(new Dimension(600, 300));
+        instance.getImages().add(image);
+        // level 3
+        image = new Info.Image();
+        image.setSize(new Dimension(200, 900));
+        instance.getImages().add(image);
+
+        assertEquals(3, instance.getNumPages());
     }
 
     /* getNumResolutions() */
 
     @Test
-    public void testGetNumResolutions() {
+    void testGetNumResolutions() {
         assertEquals(3, instance.getNumResolutions());
     }
 
-    /* getOrientation() */
+    /* getSerialization() */
 
     @Test
-    public void testGetOrientation() {
-        assertEquals(Orientation.ROTATE_270, instance.getOrientation());
+    void testGetSerialization() {
+        assertEquals(Info.Serialization.CURRENT, instance.getSerialization());
     }
 
-    /* getOrientationSize(int) */
+    /* adjustedSize() */
 
     @Test
-    public void testGetOrientationSize() {
-        Info.Image image = instance.getImages().get(0);
-        image.setOrientation(Orientation.ROTATE_90);
-        assertEquals(new Dimension(80, 100), instance.getOrientationSize());
-    }
-
-    /* getSize() */
-
-    @Test
-    public void testGetSize() {
+    void testGetSize() {
         assertEquals(new Dimension(100, 80), instance.getSize());
     }
 
-    /* getSize(int) */
+    /* adjustedSize(int) */
 
     @Test
-    public void testGetSizeWithIndex() {
+    void testGetSizeWithIndex() {
         Info.Image image = new Info.Image();
         image.width = 50;
         image.height = 40;
@@ -247,42 +608,313 @@ public class InfoTest extends BaseTest {
     /* getSourceFormat() */
 
     @Test
-    public void testGetSourceFormat() {
-        assertEquals(Format.JPG, instance.getSourceFormat());
+    void testGetSourceFormat() {
+        assertEquals(Format.get("jpg"), instance.getSourceFormat());
 
         instance.setSourceFormat(null);
         assertEquals(Format.UNKNOWN, instance.getSourceFormat());
     }
 
+    /* hashCode() */
+
+    @Test
+    void testHashCodeWithEqualInstances() {
+        Metadata metadata2 = new Metadata();
+        metadata2.setXMP("<cats/>");
+
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(metadata2)
+                .build();
+        assertEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentIdentifiers() {
+        Info info2 = Info.builder()
+                .withIdentifier(new Identifier("cows"))
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentWidths() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(999, instance.getSize().intHeight())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentHeights() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize().intWidth(), 999)
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentTileWidths() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(999, instance.getImages().get(0).getTileSize().intHeight())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentTileHeights() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize().intWidth(), 999)
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentMetadatas() {
+        Metadata metadata2 = new Metadata();
+        metadata2.setXMP("<dogs/>");
+
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(metadata2)
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentNumResolutions() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(instance.getSourceFormat())
+                .withNumResolutions(instance.getNumResolutions() + 1)
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    @Test
+    void testHashCodeWithDifferentFormats() {
+        Info info2 = Info.builder()
+                .withIdentifier(instance.getIdentifier())
+                .withSize(instance.getSize())
+                .withTileSize(instance.getImages().get(0).getTileSize())
+                .withFormat(Format.get("gif"))
+                .withNumResolutions(instance.getNumResolutions())
+                .withMetadata(instance.getMetadata())
+                .build();
+        assertNotEquals(instance.hashCode(), info2.hashCode());
+    }
+
+    /* isPyramid() */
+
+    @Test
+    void testIsPyramidWithSingleResolutionImage() {
+        instance = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withSize(100, 80)
+                .withTileSize(50, 40)
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(1)
+                .build();
+        assertFalse(instance.isPyramid());
+    }
+
+    @Test
+    void testIsPyramidWithPyramidalImage() {
+        instance = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withSize(1000, 800)
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(6)
+                .build();
+        // level 2
+        Info.Image image = new Info.Image();
+        image.setSize(new Dimension(500, 400));
+        instance.getImages().add(image);
+        // level 3
+        image = new Info.Image();
+        image.setSize(new Dimension(250, 200));
+        instance.getImages().add(image);
+        // level 4
+        image = new Info.Image();
+        image.setSize(new Dimension(125, 100));
+        instance.getImages().add(image);
+        // level 5
+        image = new Info.Image();
+        image.setSize(new Dimension(63, 50));
+        instance.getImages().add(image);
+        // level 6
+        image = new Info.Image();
+        image.setSize(new Dimension(32, 25));
+        instance.getImages().add(image);
+
+        assertTrue(instance.isPyramid());
+    }
+
+    @Test
+    void testIsPyramidWithNonPyramidalMultiImageImage() {
+        instance = Info.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withSize(1000, 800)
+                .withFormat(Format.get("jpg"))
+                .withNumResolutions(1)
+                .build();
+        Info.Image image = new Info.Image();
+        image.setSize(new Dimension(600, 300));
+        instance.getImages().add(image);
+        // level 3
+        image = new Info.Image();
+        image.setSize(new Dimension(200, 900));
+        instance.getImages().add(image);
+
+        assertFalse(instance.isPyramid());
+    }
+
+    /* setApplicationVersion() */
+
+    @Test
+    void testSetApplicationVersion() {
+        String version = "Some Version";
+        instance.setApplicationVersion(version);
+        assertEquals(version, instance.getApplicationVersion());
+    }
+
+    /* setIdentifier() */
+
+    @Test
+    void testSetIdentifier() {
+        Identifier identifier = new Identifier("Some Identifier");
+        instance.setIdentifier(identifier);
+        assertEquals(identifier, instance.getIdentifier());
+    }
+
+    /* setMediaType() */
+
+    @Test
+    void testSetMediaType() {
+        MediaType type = new MediaType("image/jpg");
+        instance.setMediaType(type);
+        assertEquals(type, instance.getMediaType());
+    }
+
+    /* setMetadata() */
+
+    @Test
+    void testSetMetadata() {
+        Metadata metadata = new Metadata();
+        instance.setMetadata(metadata);
+        assertSame(metadata, instance.getMetadata());
+    }
+
+    /* setNumResolutions() */
+
+    @Test
+    void testSetNumResolutions() {
+        instance.setNumResolutions(7);
+        assertEquals(7, instance.getNumResolutions());
+    }
+
+    /* setPersistable() */
+
+    @Test
+    void testSetPersistable() {
+        instance.setPersistable(true);
+        assertTrue(instance.isPersistable());
+        instance.setPersistable(false);
+        assertFalse(instance.isPersistable());
+    }
+
+    /* setSerializationVersion() */
+
+    @Test
+    void testSetSerializationVersionWithIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+                () -> instance.setSerializationVersion(99));
+    }
+
+    @Test
+    void testSetSerializationVersion() {
+        instance.setSerializationVersion(2);
+        assertEquals(Info.Serialization.VERSION_2, instance.getSerialization());
+    }
+
+    /* setSourceFormat() */
+
+    @Test
+    void testSetSourceFormat() {
+        Format format = Format.get("png");
+        instance.setSourceFormat(format);
+        assertEquals(format, instance.getSourceFormat());
+    }
+
     /* toJSON() */
 
     @Test
-    public void testToJSONContents() throws Exception {
-        assertEquals(
-                "{" +
-                    "\"identifier\":\"cats\"," +
-                    "\"mediaType\":\"image/jpeg\"," +
-                    "\"numResolutions\":3," +
-                    "\"images\":[" +
+    void testToJSONContents() throws Exception {
+        assertEquals("{" +
+                        "\"applicationVersion\":\"" + Application.getVersion() + "\"," +
+                        "\"serializationVersion\":" + Info.Serialization.CURRENT.getVersion() + "," +
+                        "\"identifier\":\"cats\"," +
+                        "\"mediaType\":\"image/jpeg\"," +
+                        "\"numResolutions\":3," +
+                        "\"images\":[" +
                         "{\"width\":100," +
                         "\"height\":80," +
                         "\"tileWidth\":50," +
-                        "\"tileHeight\":40," +
-                        "\"orientation\":8}" +
-                    "]" +
-                "}",
+                        "\"tileHeight\":40" +
+                        "}" +
+                        "]," +
+                        "\"metadata\":{" +
+                        "\"xmp\":\"<cats/>\"" +
+                        "}" +
+                        "}",
                 instance.toJSON());
     }
 
     @Test
-    public void testToJSONRoundTrip() throws Exception {
+    void testToJSONRoundTrip() throws Exception {
         String json = instance.toJSON();
         Info info2 = Info.fromJSON(json);
         assertEquals(instance, info2);
     }
 
     @Test
-    public void testToJSONOmitsNullValues() throws Exception {
+    void testToJSONOmitsNullValues() throws Exception {
         String json = instance.toJSON();
         assertFalse(json.contains("null"));
     }
@@ -290,42 +922,17 @@ public class InfoTest extends BaseTest {
     /* toString() */
 
     @Test
-    public void testToString() throws Exception {
+    void testToString() throws Exception {
         assertEquals(instance.toJSON(), instance.toString());
     }
 
     /* writeAsJSON() */
 
     @Test
-    public void testWriteAsJSON() throws Exception {
+    void testWriteAsJSON() throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         instance.writeAsJSON(baos);
-        assertTrue(Arrays.equals(baos.toByteArray(),
-                instance.toJSON().getBytes()));
-    }
-
-    /********************* Info.Image tests *************************/
-
-    @Test
-    public void testImageConstructor() {
-        Info.Image image = new Info.Image();
-        assertEquals(Orientation.ROTATE_0, image.getOrientation());
-        assertEquals(new Dimension(0, 0), image.getSize());
-        assertEquals(new Dimension(0, 0), image.getTileSize());
-    }
-
-    @Test
-    public void testImageGetOrientationSize() {
-        Info.Image image = instance.getImages().get(0);
-        image.setOrientation(Orientation.ROTATE_90);
-        assertEquals(new Dimension(80, 100), image.getOrientationSize());
-    }
-
-    @Test
-    public void testImageGetOrientationTileSize() {
-        Info.Image image = instance.getImages().get(0);
-        image.setOrientation(Orientation.ROTATE_90);
-        assertEquals(new Dimension(40, 50), image.getOrientationTileSize());
+        assertArrayEquals(baos.toByteArray(), instance.toJSON().getBytes());
     }
 
 }

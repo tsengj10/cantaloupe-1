@@ -1,160 +1,223 @@
 package edu.illinois.library.cantaloupe.resource;
 
+import edu.illinois.library.cantaloupe.delegate.JavaRequestContext;
+import edu.illinois.library.cantaloupe.http.Reference;
 import edu.illinois.library.cantaloupe.image.Dimension;
+import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
+import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.OperationList;
+import edu.illinois.library.cantaloupe.delegate.JavaContext;
 
 import java.net.URI;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Contains information about a client request.
+ * <p>Contains information about a client request.</p>
+ *
+ * <p>Developer note: adding, removing, or changing any of the properties also
+ * requires updating {@link RequestContextMap}.</p>
+ *
+ * <p>Developer note: this class' properties need to be kept in sync with
+ * {@link JavaContext}.</p>
+ *
+ * @see RequestContextMap
  */
 public final class RequestContext {
 
-    static final String CLIENT_IP_KEY        = "client_ip";
-    static final String COOKIES_KEY          = "cookies";
-    static final String FULL_SIZE_KEY        = "full_size";
-    static final String IDENTIFIER_KEY       = "identifier";
-    static final String OPERATIONS_KEY       = "operations";
-    static final String OUTPUT_FORMAT_KEY    = "output_format";
-    static final String REQUEST_HEADERS_KEY  = "request_headers";
-    static final String REQUEST_URI_KEY      = "request_uri";
-    static final String RESULTING_SIZE_KEY   = "resulting_size";
-    static final String SCALE_CONSTRAINT_KEY = "scale_constraint";
+    private String clientIPAddress;
+    private Map<String,String> cookies;
+    private Dimension fullSize;
+    private Identifier identifier;
+    private Reference localURI;
+    private Metadata metadata;
+    private OperationList operations;
+    private Format outputFormat;
+    private Integer pageCount;
+    private Integer pageNumber;
+    private Map<String,String> requestHeaders;
+    private Reference requestURI;
+    private Dimension resultingSize;
+    private ScaleConstraint scaleConstraint;
 
-    private final Map<String,Object> backingMap = new HashMap<>();
+    public String getClientIP() {
+        return clientIPAddress;
+    }
+
+    public Map<String,String> getCookies() {
+        return cookies;
+    }
+
+    public Dimension getFullSize() {
+        return fullSize;
+    }
+
+    public Identifier getIdentifier() {
+        return identifier;
+    }
+
+    public Reference getLocalURI() {
+        return localURI;
+    }
+
+    public Metadata getMetadata() {
+        return metadata;
+    }
+
+    public OperationList getOperationList() {
+        return operations;
+    }
+
+    public Format getOutputFormat() {
+        return outputFormat;
+    }
+
+    public Integer getPageCount() {
+        return pageCount;
+    }
+
+    public Integer getPageNumber() {
+        return pageNumber;
+    }
+
+    public Map<String,String> getRequestHeaders() {
+        return requestHeaders;
+    }
+
+    public Reference getRequestURI() {
+        return requestURI;
+    }
+
+    public Dimension getResultingSize() {
+        return resultingSize;
+    }
+
+    public ScaleConstraint getScaleConstraint() {
+        return scaleConstraint;
+    }
 
     /**
-     * Sets or clears {@link #CLIENT_IP_KEY}.
-     *
-     * @param clientIP May be {@literal null}.
+     * @param clientIP May be {@code null}.
      */
     public void setClientIP(String clientIP) {
-        if (clientIP != null) {
-            backingMap.put(CLIENT_IP_KEY, clientIP);
-        } else {
-            backingMap.remove(CLIENT_IP_KEY);
-        }
+        this.clientIPAddress = clientIP;
     }
 
     /**
-     * Sets or clears {@link #COOKIES_KEY}.
-     *
-     * @param cookies May be {@literal null}.
+     * @param cookies May be {@code null}.
      */
     public void setCookies(Map<String,String> cookies) {
-        if (cookies != null) {
-            backingMap.put(COOKIES_KEY, Collections.unmodifiableMap(cookies));
-        } else {
-            backingMap.remove(COOKIES_KEY);
-        }
+        this.cookies = cookies;
     }
 
     /**
-     * Sets or clears {@link #IDENTIFIER_KEY}.
+     * N.B.: {@link #setOperationList(OperationList, Dimension)} also sets
+     * this.
      *
-     * @param identifier May be {@literal null}.
+     * @param fullSize May be {@code null}.
+     */
+    public void setFullSize(Dimension fullSize) {
+        this.fullSize = fullSize;
+    }
+
+    /**
+     * @param identifier May be {@code null}.
      */
     public void setIdentifier(Identifier identifier) {
-        if (identifier != null) {
-            backingMap.put(IDENTIFIER_KEY, identifier.toString());
-        } else {
-            backingMap.remove(IDENTIFIER_KEY);
-        }
+        this.identifier = identifier;
     }
 
     /**
-     * Sets or clears {@link #FULL_SIZE_KEY}, {@link #IDENTIFIER_KEY},
-     * {@link #OPERATIONS_KEY}, {@link #OUTPUT_FORMAT_KEY}, and
-     * {@link #RESULTING_SIZE_KEY}.
-     *
-     * @param opList   May be {@literal null}.
-     * @param fullSize May be {@literal null}.
+     * @param uri URI seen by the application. May be {@code null}.
+     * @see #setRequestURI(Reference)
+     */
+    public void setLocalURI(Reference uri) {
+        this.localURI = uri;
+    }
+
+    /**
+     * @param metadata May be {@code null}.
+     */
+    public void setMetadata(Metadata metadata) {
+        this.metadata = metadata;
+    }
+
+    /**
+     * @param opList   May be {@code null}.
+     * @param fullSize May be {@code null}.
      */
     public void setOperationList(OperationList opList, Dimension fullSize) {
         if (opList != null && fullSize != null) {
-            backingMap.put(FULL_SIZE_KEY, toMap(fullSize));
-            backingMap.put(IDENTIFIER_KEY, opList.getIdentifier().toString());
-            backingMap.put(OPERATIONS_KEY,
-                    opList.toMap(fullSize).get("operations"));
-            backingMap.put(OUTPUT_FORMAT_KEY,
-                    opList.getOutputFormat().getPreferredMediaType().toString());
-            backingMap.put(RESULTING_SIZE_KEY,
-                    toMap(opList.getResultingSize(fullSize)));
+            this.fullSize      = fullSize;
+            this.identifier    = opList.getIdentifier();
+            this.operations    = opList;
+            this.outputFormat  = opList.getOutputFormat();
+            this.resultingSize = opList.getResultingSize(fullSize);
+            if (opList.getMetaIdentifier() != null) {
+                this.pageNumber      = opList.getMetaIdentifier().getPageNumber();
+                this.scaleConstraint = opList.getMetaIdentifier().getScaleConstraint();
+            }
         } else {
-            backingMap.remove(FULL_SIZE_KEY);
-            backingMap.remove(IDENTIFIER_KEY);
-            backingMap.remove(OPERATIONS_KEY);
-            backingMap.remove(OUTPUT_FORMAT_KEY);
-            backingMap.remove(RESULTING_SIZE_KEY);
+            this.fullSize        = null;
+            this.identifier      = null;
+            this.operations      = null;
+            this.outputFormat    = null;
+            this.pageNumber      = null;
+            this.resultingSize   = null;
+            this.scaleConstraint = null;
         }
     }
 
     /**
-     * Sets {@link #REQUEST_HEADERS_KEY}.
-     *
-     * @param requestHeaders May be {@literal null}.
+     * @param pageCount May be {@code null}.
+     */
+    public void setPageCount(Integer pageCount) {
+        this.pageCount = pageCount;
+    }
+
+    /**
+     * @param pageNumber May be {@code null}.
+     */
+    public void setPageNumber(Integer pageNumber) {
+        this.pageNumber = pageNumber;
+    }
+
+    /**
+     * @param requestHeaders May be {@code null}.
      */
     public void setRequestHeaders(Map<String,String> requestHeaders) {
-        if (requestHeaders != null) {
-            backingMap.put(REQUEST_HEADERS_KEY,
-                    Collections.unmodifiableMap(requestHeaders));
-        } else {
-            backingMap.remove(REQUEST_HEADERS_KEY);
-        }
+        this.requestHeaders = requestHeaders;
     }
 
     /**
-     * Sets {@link #REQUEST_URI_KEY}.
-     *
-     * @param uri May be {@literal null}.
+     * @param uri URI requested by the client .May be {@code null}.
+     * @see #setLocalURI(Reference)
      */
-    public void setRequestURI(URI uri) {
-        if (uri != null) {
-            backingMap.put(REQUEST_URI_KEY, uri.toString());
-        } else {
-            backingMap.remove(REQUEST_URI_KEY);
-        }
+    public void setRequestURI(Reference uri) {
+        this.requestURI = uri;
     }
 
     /**
-     * Sets {@link #SCALE_CONSTRAINT_KEY}.
-     *
-     * @param scaleConstraint May be {@literal null}.
+     * @param scaleConstraint May be {@code null}.
      */
     public void setScaleConstraint(ScaleConstraint scaleConstraint) {
-        if (scaleConstraint != null) {
-            backingMap.put(SCALE_CONSTRAINT_KEY,
-                    Collections.unmodifiableList(Arrays.asList(
-                            scaleConstraint.getRational().getNumerator(),
-                            scaleConstraint.getRational().getDenominator())));
-        } else {
-            backingMap.remove(SCALE_CONSTRAINT_KEY);
-        }
+        this.scaleConstraint = scaleConstraint;
     }
 
     /**
-     * <p>Returns a &quot;live view&quot; map representation of the instance.
-     * Keys correspond to non-{@literal null} properties. Any of the keys
-     * represented by the class key constants may be present, like {@link
-     * #CLIENT_IP_KEY}, etc.</p>
-     *
-     * @return Map representation of the instance.
+     * @return New instance backed by this instance.
      */
-    public Map<String,Object> toMap() {
-        return backingMap;
+    public JavaContext toJavaContext() {
+        return new JavaRequestContext(this);
     }
 
-    private Map<String,Integer> toMap(Dimension size) {
-        Map<String,Integer> map = new HashMap<>();
-        map.put("width", size.intWidth());
-        map.put("height", size.intHeight());
-        return Collections.unmodifiableMap(map);
+    /**
+     * @return &quot;Live view&quot; map representation of the instance.
+     * @see RequestContextMap for available keys.
+     */
+    public Map<String,Object> toMap() {
+        return new RequestContextMap<>(this);
     }
 
 }

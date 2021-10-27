@@ -5,7 +5,7 @@ import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.MediaType;
-import edu.illinois.library.cantaloupe.script.DelegateMethod;
+import edu.illinois.library.cantaloupe.delegate.DelegateMethod;
 import edu.illinois.library.cantaloupe.util.StringUtils;
 import org.apache.commons.lang3.SystemUtils;
 import org.slf4j.Logger;
@@ -18,7 +18,9 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 /**
  * <p>Provides access to source content located on a locally attached
@@ -26,7 +28,7 @@ import java.util.List;
  *
  * <h1>Format Determination</h1>
  *
- * <p>See {@link #getFormat()}.</p>
+ * <p>See {@link FormatIterator}.</p>
  *
  * <h1>Lookup Strategies</h1>
  *
@@ -36,28 +38,93 @@ import java.util.List;
  * ScriptLookupStrategy invokes a delegate method to retrieve a pathname
  * dynamically.</p>
  */
-class FilesystemSource extends AbstractSource
-        implements StreamSource, FileSource {
+class FilesystemSource extends AbstractSource implements Source {
+
+    /**
+     * <ol>
+     *     <li>If the file's filename contains an extension, the format is
+     *     inferred from that.</li>
+     *     <li>If unsuccessful, and the identifier contains an extension, the
+     *     format is inferred from that.</li>
+     *     <li>If unsuccessful, the format is inferred from the file's magic
+     *     bytes.</li>
+     * </ol>
+     */
+    class FormatIterator<T> implements Iterator<T> {
+
+        /**
+         * Infers a {@link Format} based on image magic bytes.
+         */
+        private class ByteChecker implements FormatChecker {
+            @Override
+            public Format check() throws IOException {
+                final Path path = getFile();
+                List<MediaType> detectedTypes = MediaType.detectMediaTypes(path);
+                if (!detectedTypes.isEmpty()) {
+                    return detectedTypes.get(0).toFormat();
+                }
+                return Format.UNKNOWN;
+            }
+        }
+
+        private FormatChecker formatChecker;
+
+        @Override
+        public boolean hasNext() {
+            return (formatChecker == null ||
+                    formatChecker instanceof NameFormatChecker ||
+                    formatChecker instanceof IdentifierFormatChecker);
+        }
+
+        @Override
+        public T next() {
+            if (formatChecker == null) {
+                try {
+                    formatChecker = new NameFormatChecker(getFile().getFileName().toString());
+                } catch (IOException e) {
+                    LOGGER.warn("FormatIterator.next(): {}", e.getMessage(), e);
+                    formatChecker = new NameFormatChecker("***BOGUS***");
+                    return next();
+                }
+            } else if (formatChecker instanceof NameFormatChecker) {
+                formatChecker = new IdentifierFormatChecker(getIdentifier());
+            } else if (formatChecker instanceof IdentifierFormatChecker) {
+                formatChecker = new ByteChecker();
+            } else {
+                throw new NoSuchElementException();
+            }
+            try {
+                //noinspection unchecked
+                return (T) formatChecker.check();
+            } catch (IOException e) {
+                LOGGER.warn("Error checking format: {}", e.getMessage());
+                //noinspection unchecked
+                return (T) Format.UNKNOWN;
+            }
+        }
+    }
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(FilesystemSource.class);
 
-    private static final String UNIX_PATH_SEPARATOR = "/";
+    private static final String UNIX_PATH_SEPARATOR    = "/";
     private static final String WINDOWS_PATH_SEPARATOR = "\\";
 
+    private FormatIterator<Format> formatIterator = new FormatIterator<>();
+
     /**
-     * Lazy-loaded by {@link #getPath}.
+     * Lazy-loaded by {@link #getFile}.
      */
     private Path path;
 
     @Override
     public void checkAccess() throws IOException {
-        final Path path = getPath();
-        if (!Files.exists(path)) {
+        final Path file = getFile();
+        if (!Files.exists(file)) {
             throw new NoSuchFileException("Failed to resolve " +
-                    identifier + " to " + path);
-        } else if (!Files.isReadable(path)) {
-            throw new AccessDeniedException("File is not readable: " + path);
+                    identifier + " to " + file);
+        } else if (!Files.isReadable(file)) {
+            throw new AccessDeniedException("File is not readable: " + file);
         }
     }
 
@@ -68,7 +135,7 @@ class FilesystemSource extends AbstractSource
      *         cached.
      */
     @Override
-    public Path getPath() throws IOException {
+    public Path getFile() throws IOException {
         if (path == null) {
             final LookupStrategy strategy =
                     LookupStrategy.from(Key.FILESYSTEMSOURCE_LOOKUP_STRATEGY);
@@ -88,6 +155,11 @@ class FilesystemSource extends AbstractSource
             LOGGER.debug("Resolved {} to {}", identifier, path);
         }
         return path;
+    }
+
+    @Override
+    public FormatIterator<Format> getFormatIterator() {
+        return formatIterator;
     }
 
     private Path getPathWithBasicStrategy() {
@@ -120,56 +192,9 @@ class FilesystemSource extends AbstractSource
         return Paths.get(pathname);
     }
 
-    /**
-     * <ol>
-     *     <li>If the file's filename contains an extension, the format is
-     *     inferred from that.</li>
-     *     <li>If unsuccessful, and the identifier contains an extension, the
-     *     format is inferred from that.</li>
-     *     <li>If unsuccessful, the format is inferred from the file's magic
-     *     bytes.</li>
-     * </ol>
-     *
-     * @return Best attempt at determining the file format.
-     * @throws IOException if the magic byte check fails.
-     */
-    @Override
-    public Format getFormat() throws IOException {
-        if (format == null) {
-            // Try to infer a format from the filename.
-            format = Format.inferFormat(getPath().getFileName().toString());
-
-            if (Format.UNKNOWN.equals(format)) {
-                // Try to infer a format from the identifier.
-                format = Format.inferFormat(identifier);
-            }
-
-            if (Format.UNKNOWN.equals(format)) {
-                // Fall back to reading the magic bytes.
-                format = detectFormat();
-            }
-        }
-        return format;
-    }
-
-    /**
-     * Detects the format of a file by reading its header.
-     *
-     * @return Detected format, or {@link Format#UNKNOWN}.
-     */
-    private Format detectFormat() throws IOException {
-        Format format = Format.UNKNOWN;
-        final Path path = getPath();
-        List<MediaType> detectedTypes = MediaType.detectMediaTypes(path);
-        if (!detectedTypes.isEmpty()) {
-            format = detectedTypes.get(0).toFormat();
-        }
-        return format;
-    }
-
     @Override
     public StreamFactory newStreamFactory() throws IOException {
-        return new PathStreamFactory(getPath());
+        return new PathStreamFactory(getFile());
     }
 
     /**
@@ -196,9 +221,18 @@ class FilesystemSource extends AbstractSource
 
     @Override
     public void setIdentifier(Identifier identifier) {
-        path = null;
-        format = null;
-        this.identifier = identifier;
+        super.setIdentifier(identifier);
+        reset();
+    }
+
+    private void reset() {
+        path           = null;
+        formatIterator = new FormatIterator<>();
+    }
+
+    @Override
+    public boolean supportsFileAccess() {
+        return true;
     }
 
 }

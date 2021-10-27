@@ -1,12 +1,12 @@
 package edu.illinois.library.cantaloupe.config;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -76,6 +76,17 @@ public final class ConfigurationProvider implements Configuration {
     }
 
     @Override
+    public Optional<Path> getFile() {
+        final List<Configuration> wrappedConfigs = getWrappedConfigurations();
+        if (wrappedConfigs.size() > 1 &&
+                wrappedConfigs.get(1) instanceof FileConfiguration) {
+            final FileConfiguration fileConfig = (FileConfiguration) wrappedConfigs.get(1);
+            return fileConfig.getFile();
+        }
+        return Optional.empty();
+    }
+
+    @Override
     public float getFloat(String key) {
         for (Configuration config : wrappedConfigs) {
             try {
@@ -119,9 +130,9 @@ public final class ConfigurationProvider implements Configuration {
     public Iterator<String> getKeys() {
         final List<Iterator<String>> iterators = wrappedConfigs.stream()
                 .map(Configuration::getKeys)
-                .collect(Collectors.toList());
+                .collect(Collectors.toUnmodifiableList());
 
-        return new Iterator<String>() {
+        return new Iterator<>() {
             private int configIndex = 0;
 
             @Override
@@ -161,9 +172,8 @@ public final class ConfigurationProvider implements Configuration {
         return defaultValue;
     }
 
-    @Nullable
     @Override
-    public Object getProperty(@Nonnull String key) {
+    public Object getProperty(String key) {
         Object value = null;
         for (Configuration config : wrappedConfigs) {
             value = config.getProperty(key);
@@ -175,8 +185,7 @@ public final class ConfigurationProvider implements Configuration {
     }
 
     @Override
-    @Nullable
-    public String getString(@Nonnull String key) {
+    public String getString(String key) {
         String value = null;
         for (Configuration config : wrappedConfigs) {
             value = config.getString(key);

@@ -1,13 +1,14 @@
 package edu.illinois.library.cantaloupe.util;
 
-import org.junit.Test;
+import edu.illinois.library.cantaloupe.test.BaseTest;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-public class TimeUtilsTest {
+public class TimeUtilsTest extends BaseTest {
 
     @Test
-    public void testMillisecondsToHumanTime() {
+    void testMillisecondsToHumanTime() {
         // seconds
         assertEquals("0 seconds", TimeUtils.millisecondsToHumanTime(50));
         assertEquals("1 second", TimeUtils.millisecondsToHumanTime(1000));
@@ -34,6 +35,36 @@ public class TimeUtilsTest {
                 TimeUtils.millisecondsToHumanTime(1000 * 60 * 60 * 24 + 1000));
         assertEquals("1 day, 2 hours, 2 minutes, 1 second",
                 TimeUtils.millisecondsToHumanTime(1000 * 60 * 60 * 24 + 60 * 60 * 2 * 1000 + 120 * 1000 + 1000));
+    }
+
+    @Test
+    void testToHMSWithIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+                () -> TimeUtils.toHMS(-324));
+    }
+
+    @Test
+    void testToHMS() {
+        assertEquals("00:00:15", TimeUtils.toHMS(15));
+        assertEquals("00:01:15", TimeUtils.toHMS(75));
+        assertEquals("03:47:59", TimeUtils.toHMS(13679));
+    }
+
+    @Test
+    void testToSecondsWithIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+                () -> TimeUtils.toSeconds("47:59"));
+        assertThrows(IllegalArgumentException.class,
+                () -> TimeUtils.toSeconds("12:13:47:59"));
+        assertThrows(IllegalArgumentException.class,
+                () -> TimeUtils.toSeconds("12:-47:-59"));
+        assertThrows(IllegalArgumentException.class,
+                () -> TimeUtils.toSeconds("cats:cats:cats"));
+    }
+
+    @Test
+    void testToSeconds() {
+        assertEquals(13679, TimeUtils.toSeconds("03:47:59"));
     }
 
 }

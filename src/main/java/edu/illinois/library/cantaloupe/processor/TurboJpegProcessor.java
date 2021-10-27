@@ -3,10 +3,10 @@ package edu.illinois.library.cantaloupe.processor;
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Info;
+import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.image.Rectangle;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
-import edu.illinois.library.cantaloupe.operation.Color;
 import edu.illinois.library.cantaloupe.operation.ColorTransform;
 import edu.illinois.library.cantaloupe.operation.Crop;
 import edu.illinois.library.cantaloupe.operation.CropByPercent;
@@ -20,9 +20,9 @@ import edu.illinois.library.cantaloupe.operation.Sharpen;
 import edu.illinois.library.cantaloupe.operation.Transpose;
 import edu.illinois.library.cantaloupe.operation.overlay.Overlay;
 import edu.illinois.library.cantaloupe.operation.redaction.Redaction;
-import edu.illinois.library.cantaloupe.processor.codec.turbojpeg.TurboJPEGImageReader;
-import edu.illinois.library.cantaloupe.processor.codec.turbojpeg.TurboJPEGImageWriter;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg.JPEGMetadataReader;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg.TurboJPEGImageReader;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg.TurboJPEGImageWriter;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,20 +30,12 @@ import org.slf4j.LoggerFactory;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Collections;
-import java.util.EnumSet;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
  * <p>Processor using the TurboJPEG high-level API to the libjpeg-turbo native
  * library via the Java Native Interface (JNI).</p>
- *
- * <p>{@link TurboJPEGImageReader} is used to acquire a (possibly) scaled
- * region of interest that is buffered in memory. Java 2D is used for
- * post-processing steps when necessary, but otherwise, care is taken to only
- * decompress the source JPEG data when later processing steps require it.</p>
  *
  * <h1>Usage</h1>
  *
@@ -62,53 +54,23 @@ public class TurboJpegProcessor extends AbstractProcessor
             LoggerFactory.getLogger(TurboJpegProcessor.class);
 
     private static final Set<Format> SUPPORTED_OUTPUT_FORMATS =
-            Collections.unmodifiableSet(EnumSet.of(Format.JPG));
+            Set.of(Format.get("jpg"));
 
-    private static final Set<ProcessorFeature> SUPPORTED_FEATURES =
-            Collections.unmodifiableSet(EnumSet.of(
-                    ProcessorFeature.MIRRORING,
-                    ProcessorFeature.REGION_BY_PERCENT,
-                    ProcessorFeature.REGION_BY_PIXELS,
-                    ProcessorFeature.REGION_SQUARE,
-                    ProcessorFeature.ROTATION_BY_90S,
-                    ProcessorFeature.ROTATION_ARBITRARY,
-                    ProcessorFeature.SIZE_ABOVE_FULL,
-                    ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-                    ProcessorFeature.SIZE_BY_HEIGHT,
-                    ProcessorFeature.SIZE_BY_PERCENT,
-                    ProcessorFeature.SIZE_BY_WIDTH,
-                    ProcessorFeature.SIZE_BY_WIDTH_HEIGHT));
+    private static boolean isClassInitialized;
 
-    private static final Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-            SUPPORTED_IIIF_1_1_QUALITIES = Collections.unmodifiableSet(EnumSet.of(
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.BITONAL,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.COLOR,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.GREY,
-            edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.NATIVE));
-
-    private static final Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-            SUPPORTED_IIIF_2_0_QUALITIES = Collections.unmodifiableSet(EnumSet.of(
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.BITONAL,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.COLOR,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.DEFAULT,
-            edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.GRAY));
-
-    private static final AtomicBoolean IS_CLASS_INITIALIZED = new AtomicBoolean();
-
-    private static final boolean USE_FAST_DECODE_DCT = true;
+    private static final boolean USE_FAST_DECODE_DCT = false;
     private static final boolean USE_FAST_ENCODE_DCT = true;
 
     private static String initializationError;
 
     private TurboJPEGImageReader imageReader;
+    private final JPEGMetadataReader metadataReader = new JPEGMetadataReader();
 
     private StreamFactory streamFactory;
 
     private static synchronized void initializeClass() {
-        if (!IS_CLASS_INITIALIZED.get()) {
-            IS_CLASS_INITIALIZED.set(true);
+        if (!isClassInitialized) {
+            isClassInitialized = true;
             try {
                 TurboJPEGImageReader.initialize();
             } catch (UnsatisfiedLinkError e) {
@@ -118,7 +80,7 @@ public class TurboJpegProcessor extends AbstractProcessor
     }
 
     static synchronized void resetInitialization() {
-        IS_CLASS_INITIALIZED.set(false);
+        isClassInitialized = false;
     }
 
     TurboJpegProcessor() {
@@ -150,29 +112,12 @@ public class TurboJpegProcessor extends AbstractProcessor
 
     @Override
     public Format getSourceFormat() {
-        return Format.JPG;
+        return Format.get("jpg");
     }
 
     @Override
     public StreamFactory getStreamFactory() {
         return streamFactory;
-    }
-
-    @Override
-    public Set<ProcessorFeature> getSupportedFeatures() {
-        return SUPPORTED_FEATURES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality>
-    getSupportedIIIF1Qualities() {
-        return SUPPORTED_IIIF_1_1_QUALITIES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality>
-    getSupportedIIIF2Qualities() {
-        return SUPPORTED_IIIF_2_0_QUALITIES;
     }
 
     @Override
@@ -182,9 +127,9 @@ public class TurboJpegProcessor extends AbstractProcessor
 
     @Override
     public void setSourceFormat(Format format)
-            throws UnsupportedSourceFormatException {
-        if (!Format.JPG.equals(format)) {
-            throw new UnsupportedSourceFormatException(format);
+            throws SourceFormatException {
+        if (!Format.get("jpg").equals(format)) {
+            throw new SourceFormatException(format);
         }
     }
 
@@ -194,14 +139,25 @@ public class TurboJpegProcessor extends AbstractProcessor
         try {
             imageReader.setSource(streamFactory.newInputStream());
         } catch (IOException e) {
-            LOGGER.error(e.getMessage());
+            LOGGER.warn(e.getMessage());
+        } finally {
+            try {
+                metadataReader.setSource(streamFactory.newSeekableStream());
+            } catch (IOException e) {
+                LOGGER.warn(e.getMessage());
+            }
         }
+    }
+
+    @Override
+    public boolean supportsSourceFormat(Format format) {
+        return Format.get("jpg").equals(format);
     }
 
     @Override
     public void process(final OperationList opList,
                         final Info info,
-                        final OutputStream outputStream) throws ProcessorException {
+                        final OutputStream outputStream) throws FormatException, ProcessorException {
         final Dimension fullSize              = info.getSize();
         final ReductionFactor reductionFactor = new ReductionFactor();
         final ScaleConstraint scaleConstraint = opList.getScaleConstraint();
@@ -216,6 +172,12 @@ public class TurboJpegProcessor extends AbstractProcessor
             BufferedImage image =
                     imageReader.readAsBufferedImage(roiWithinSafeRegion);
 
+            Orientation orientation = Orientation.ROTATE_0;
+            final Metadata metadata = info.getMetadata();
+            if (metadata != null) {
+                orientation = metadata.getOrientation();
+            }
+
             // Apply the crop operation, if present, and retain a reference
             // to it for subsequent operations to refer to.
             Crop crop = new CropByPercent();
@@ -223,13 +185,22 @@ public class TurboJpegProcessor extends AbstractProcessor
                 if (op instanceof Crop) {
                     crop = (Crop) op;
                     if (crop.hasEffect(fullSize, opList)) {
+                        // The TurboJPEG writer cannot deal with a
+                        // BufferedImage that has been "virtually cropped" by
+                        // BufferedImage.getSubimage(). We must tell this
+                        // method to copy the underlying raster.
                         image = Java2DUtil.crop(image, crop, reductionFactor,
-                                opList.getScaleConstraint());
+                                scaleConstraint, true);
                     }
                 }
             }
 
-            // Redactions happen immediately after cropping.
+            // All operations have already been corrected for the orientation,
+            // but the image itself has not yet been corrected.
+            if (!Orientation.ROTATE_0.equals(orientation)) {
+                image = Java2DUtil.rotate(image, orientation);
+            }
+
             final Set<Redaction> redactions = opList.stream()
                     .filter(op -> op instanceof Redaction)
                     .filter(op -> op.hasEffect(fullSize, opList))
@@ -237,24 +208,35 @@ public class TurboJpegProcessor extends AbstractProcessor
                     .collect(Collectors.toSet());
             Java2DUtil.applyRedactions(image, fullSize, crop,
                     new double[] { 1.0, 1.0 }, reductionFactor,
-                    opList.getScaleConstraint(), redactions);
+                    scaleConstraint, redactions);
 
             final Encode encode = (Encode) opList.getFirst(Encode.class);
-            final Color bgColor = encode.getBackgroundColor();
             writer.setQuality(encode.getQuality());
             writer.setProgressive(encode.isInterlacing());
+            if (metadata != null) {
+                metadata.getXMP().ifPresent(writer::setXMP);
+            }
 
             for (Operation op : opList) {
                 if (!op.hasEffect(fullSize, opList)) {
                     continue;
                 }
                 if (op instanceof Scale) {
-                    image = Java2DUtil.scale(image, (Scale) op,
-                            scaleConstraint, reductionFactor);
+                    final Scale scale = (Scale) op;
+                    final boolean isLinear = scale.isLinear() &&
+                            !scale.isUp(fullSize, scaleConstraint);
+                    if (isLinear) {
+                        image = Java2DUtil.convertColorToLinearRGB(image);
+                    }
+                    image = Java2DUtil.scale(image, scale,
+                            scaleConstraint, reductionFactor, isLinear);
+                    if (isLinear) {
+                        image = Java2DUtil.convertColorToSRGB(image);
+                    }
                 } else if (op instanceof Transpose) {
                     image = Java2DUtil.transpose(image, (Transpose) op);
                 } else if (op instanceof Rotate) {
-                    image = Java2DUtil.rotate(image, (Rotate) op, bgColor);
+                    image = Java2DUtil.rotate(image, (Rotate) op);
                 } else if (op instanceof ColorTransform) {
                     image = Java2DUtil.transformColor(image, (ColorTransform) op);
                 } else if (op instanceof Sharpen) {
@@ -263,8 +245,9 @@ public class TurboJpegProcessor extends AbstractProcessor
                     Java2DUtil.applyOverlay(image, (Overlay) op);
                 }
             }
-
             writer.write(image, outputStream);
+        } catch (SourceFormatException e) {
+            throw e;
         } catch (IOException e) {
             throw new ProcessorException(e);
         }
@@ -273,12 +256,37 @@ public class TurboJpegProcessor extends AbstractProcessor
     @Override
     public Info readInfo() throws IOException {
         return Info.builder()
-                .withFormat(Format.JPG)
+                .withFormat(Format.get("jpg"))
                 .withSize(imageReader.getWidth(), imageReader.getHeight())
                 .withTileSize(imageReader.getWidth(), imageReader.getHeight())
                 .withNumResolutions(1)
-                .withOrientation(Orientation.ROTATE_0) // TODO: fix this
+                .withMetadata(readMetadata())
                 .build();
+    }
+
+    private Metadata readMetadata() throws IOException {
+        final Metadata metadata = new Metadata();
+        // EXIF
+        byte[] exif = metadataReader.getEXIF();
+        if (exif != null) {
+            try (edu.illinois.library.cantaloupe.image.exif.Reader exifReader =
+                    new edu.illinois.library.cantaloupe.image.exif.Reader()) {
+                exifReader.setSource(exif);
+                metadata.setEXIF(exifReader.read());
+            }
+        }
+        // IPTC
+        byte[] iptc = metadataReader.getIPTC();
+        if (iptc != null) {
+            try (edu.illinois.library.cantaloupe.image.iptc.Reader iptcReader =
+                    new edu.illinois.library.cantaloupe.image.iptc.Reader()) {
+                iptcReader.setSource(iptc);
+                metadata.setIPTC(iptcReader.read());
+            }
+        }
+        // XMP
+        metadata.setXMP(metadataReader.getXMP());
+        return metadata;
     }
 
 }

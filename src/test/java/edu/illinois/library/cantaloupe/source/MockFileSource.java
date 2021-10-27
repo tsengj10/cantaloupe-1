@@ -3,22 +3,30 @@ package edu.illinois.library.cantaloupe.source;
 import edu.illinois.library.cantaloupe.image.Format;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.Iterator;
 
-public class MockFileSource extends AbstractSource implements FileSource {
+public class MockFileSource extends AbstractSource implements Source {
 
     @Override
     public void checkAccess() throws IOException {
     }
 
     @Override
-    public Format getFormat() throws IOException {
+    public Iterator<Format> getFormatIterator() {
+        return Collections.emptyIterator();
+    }
+
+    @Override
+    public Path getFile() {
         return null;
     }
 
     @Override
-    public Path getPath() throws IOException {
-        return null;
+    public StreamFactory newStreamFactory() {
+        return () -> InputStream.nullInputStream();
     }
 
 }

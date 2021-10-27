@@ -1,38 +1,26 @@
 package edu.illinois.library.cantaloupe.resource.iiif.v2;
 
-import edu.illinois.library.cantaloupe.cache.CacheFacade;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.http.Method;
+import edu.illinois.library.cantaloupe.http.Status;
 import edu.illinois.library.cantaloupe.image.Dimension;
-import edu.illinois.library.cantaloupe.image.Format;
-import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
-import edu.illinois.library.cantaloupe.image.MediaType;
+import edu.illinois.library.cantaloupe.image.Metadata;
+import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.processor.Processor;
-import edu.illinois.library.cantaloupe.processor.ProcessorConnector;
-import edu.illinois.library.cantaloupe.processor.ProcessorFactory;
-import edu.illinois.library.cantaloupe.processor.UnsupportedOutputFormatException;
-import edu.illinois.library.cantaloupe.processor.UnsupportedSourceFormatException;
-import edu.illinois.library.cantaloupe.resource.CachedImageRepresentation;
 import edu.illinois.library.cantaloupe.resource.IllegalClientArgumentException;
-import edu.illinois.library.cantaloupe.resource.ImageRepresentation;
 import edu.illinois.library.cantaloupe.resource.Route;
-import edu.illinois.library.cantaloupe.status.HealthChecker;
+import edu.illinois.library.cantaloupe.resource.ImageRequestHandler;
 import edu.illinois.library.cantaloupe.resource.iiif.SizeRestrictedException;
-import edu.illinois.library.cantaloupe.source.Source;
-import edu.illinois.library.cantaloupe.source.SourceFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 /**
  * Handles IIIF Image API 2.x image requests.
@@ -47,6 +35,11 @@ public class ImageResource extends IIIF2Resource {
 
     private static final Method[] SUPPORTED_METHODS =
             new Method[] { Method.GET, Method.OPTIONS };
+
+    /**
+     * Map of response headers to be added to the response upon success.
+     */
+    private final Map<String,String> queuedHeaders = new HashMap<>();
 
     @Override
     protected Logger getLogger() {
@@ -67,221 +60,116 @@ public class ImageResource extends IIIF2Resource {
             return;
         }
 
-        final Configuration config     = Configuration.getInstance();
-        final List<String> args        = getPathArguments();
-        final Identifier identifier    = getIdentifier();
-        final CacheFacade cacheFacade  = new CacheFacade();
-        final boolean isBypassingCache = isBypassingCache();
-
-        // Assemble the URI parameters into a Parameters object.
+        // Assemble the URI path segments into a Parameters object.
+        final List<String> args = getPathArguments();
         final Parameters params = new Parameters(
-                identifier, args.get(1), args.get(2),
+                getIdentifier().toString(), args.get(1), args.get(2),
                 args.get(3), args.get(4), args.get(5));
-        final OperationList ops = params.toOperationList();
+        // Convert it into an OperationList.
+        final OperationList ops = params.toOperationList(getDelegateProxy());
+        ops.setPageIndex(getPageIndex());
         ops.getOptions().putAll(getRequest().getReference().getQuery().toMap());
-
+        final int pageIndex = getPageIndex();
         final String disposition = getRepresentationDisposition(
-                getRequest().getReference().getQuery()
-                        .getFirstValue(RESPONSE_CONTENT_DISPOSITION_QUERY_ARG),
-                ops.getIdentifier(), ops.getOutputFormat());
+                ops.getMetaIdentifier().toString(), ops.getOutputFormat());
 
-        Format sourceFormat = Format.UNKNOWN;
+        class CustomCallback implements ImageRequestHandler.Callback {
+            @Override
+            public boolean preAuthorize() throws Exception {
+                return ImageResource.this.preAuthorize();
+            }
 
-        // If we are using a cache, and don't need to resolve first:
-        // 1. If the cache contains an image matching the request, skip all the
-        //    setup and just return the cached image.
-        // 2. Otherwise, if the cache contains a relevant info, get it to avoid
-        //    having to get it from a source later.
-        if (!isBypassingCache && !isResolvingFirst()) {
-            final Info info = cacheFacade.getInfo(identifier);
-            if (info != null) {
-                ops.setScaleConstraint(getScaleConstraint());
-                ops.applyNonEndpointMutations(info, getDelegateProxy());
+            @Override
+            public boolean authorize() throws Exception {
+                return ImageResource.this.authorize();
+            }
 
-                InputStream cacheStream = null;
+            @Override
+            public void infoAvailable(Info info) {
+                if (Size.ScaleMode.MAX.equals(params.getSize().getScaleMode())) {
+                    constrainSizeToMaxPixels(info.getSize(), ops);
+                }
                 try {
-                    cacheStream = cacheFacade.newDerivativeImageInputStream(ops);
-                } catch (IOException e) {
-                    // Don't rethrow -- it's still possible to service the
-                    // request.
-                    LOGGER.error(e.getMessage());
+                    enqueueHeaders(params, info.getSize(pageIndex), disposition);
+                } catch (IndexOutOfBoundsException e) {
+                    throw new IllegalClientArgumentException(e);
                 }
+            }
 
-                if (cacheStream != null) {
-                    addHeaders(disposition,
-                            params.getOutputFormat().toFormat().getPreferredMediaType().toString());
+            @Override
+            public void willStreamImageFromDerivativeCache() {
+                sendHeaders();
+            }
 
-                    new CachedImageRepresentation(cacheStream)
-                            .write(getResponse().getOutputStream());
-                    return;
-                } else {
-                    Format infoFormat = info.getSourceFormat();
-                    if (infoFormat != null) {
-                        sourceFormat = infoFormat;
-                    }
-                }
+            @Override
+            public void willProcessImage(Processor processor,
+                                         Info info) throws Exception {
+                final Metadata metadata       = info.getMetadata();
+                final Orientation orientation = (metadata != null) ?
+                        metadata.getOrientation() : Orientation.ROTATE_0;
+                final Dimension virtualSize   = orientation.adjustedSize(info.getSize(pageIndex));
+                final Dimension resultingSize = ops.getResultingSize(info.getSize());
+                validateScale(
+                        virtualSize,
+                        (Scale) ops.getFirst(Scale.class),
+                        Status.FORBIDDEN);
+                validateSize(resultingSize, virtualSize);
+                sendHeaders();
             }
         }
 
-        final Source source = new SourceFactory().newSource(
-                identifier, getDelegateProxy());
-
-        // If we are resolving first, or if the source image is not present in
-        // the source cache (if enabled), check access to it in preparation for
-        // retrieval.
-        final Path sourceImage = cacheFacade.getSourceCacheFile(identifier);
-        if (sourceImage == null || isResolvingFirst()) {
-            try {
-                source.checkAccess();
-            } catch (NoSuchFileException e) { // this needs to be rethrown!
-                if (config.getBoolean(Key.CACHE_SERVER_PURGE_MISSING, false)) {
-                    // If the image was not found, purge it from the cache.
-                    cacheFacade.purgeAsync(ops.getIdentifier());
-                }
-                throw e;
-            }
-        }
-
-        // If we don't know the format yet, get it.
-        if (Format.UNKNOWN.equals(sourceFormat)) {
-            // If we are not resolving first, and there is a hit in the source
-            // cache, read the format from the source-cached-file, as we will
-            // expect source cache access to be more efficient.
-            // Otherwise, read it from the source.
-            if (!isResolvingFirst() && sourceImage != null) {
-                List<MediaType> mediaTypes = MediaType.detectMediaTypes(sourceImage);
-                if (!mediaTypes.isEmpty()) {
-                    sourceFormat = mediaTypes.get(0).toFormat();
-                }
-            } else {
-                sourceFormat = source.getFormat();
-            }
-        }
-
-        // Obtain an instance of the processor assigned to that format.
-        try (final Processor processor =
-                     new ProcessorFactory().newProcessor(sourceFormat)) {
-            // Connect it to the source.
-            tempFileFuture = new ProcessorConnector().connect(
-                    source, processor, identifier, sourceFormat);
-
-            final Info info = getOrReadInfo(ops.getIdentifier(), processor);
-            Dimension fullSize;
-            try {
-                fullSize = info.getSize(getPageIndex());
-
-                ops.setScaleConstraint(getScaleConstraint());
-                ops.applyNonEndpointMutations(info, getDelegateProxy());
-                ops.freeze();
-
-                getRequestContext().setOperationList(ops, fullSize);
-            } catch (IllegalArgumentException | IndexOutOfBoundsException e) {
-                throw new IllegalClientArgumentException(e);
-            }
-
-            if (!authorize()) {
-                return;
-            }
-
-            processor.validate(ops, fullSize);
-
-            final Dimension virtualSize = info.getOrientationSize();
-            final Dimension resultingSize = ops.getResultingSize(info.getSize());
-            validateScale(virtualSize, (Scale) ops.getFirst(Scale.class));
-            validateSize(resultingSize, virtualSize, processor);
-
-            // Find out whether the processor supports the source format by asking
-            // it whether it offers any output formats for it.
-            Set<Format> availableOutputFormats = processor.getAvailableOutputFormats();
-            if (!availableOutputFormats.isEmpty()) {
-                if (!availableOutputFormats.contains(ops.getOutputFormat())) {
-                    Exception e = new UnsupportedOutputFormatException(
-                            processor, ops.getOutputFormat());
-                    LOGGER.warn("{}: {}",
-                            e.getMessage(),
-                            getRequest().getReference());
-                    throw e;
-                }
-            } else {
-                throw new UnsupportedSourceFormatException(sourceFormat);
-            }
-
-            addHeaders(params, fullSize, disposition,
-                    params.getOutputFormat().toFormat().getPreferredMediaType().toString());
-
-            new ImageRepresentation(info, processor, ops, isBypassingCache)
-                    .write(getResponse().getOutputStream());
-
-            // Notify the health checker of a successful response -- after the
-            // response has been written successfully, obviously.
-            HealthChecker.addSourceProcessorPair(source, processor, ops);
+        try (ImageRequestHandler handler = ImageRequestHandler.builder()
+                .withOperationList(ops)
+                .withBypassingCache(isBypassingCache())
+                .withBypassingCacheRead(isBypassingCacheRead())
+                .optionallyWithDelegateProxy(getDelegateProxy(), getRequestContext())
+                .withCallback(new CustomCallback())
+                .build()) {
+            handler.handle(getResponse().getOutputStream());
         }
     }
 
     /**
-     * Adds {@code Content-Disposition} and {@code Content-Type} response
-     * headers.
+     * Adds {@code Content-Disposition}, {@code Content-Type}, and {@code Link}
+     * response headers to a queue which will be sent upon a success response.
      */
-    private void addHeaders(String disposition,
-                            String contentType) {
+    private void enqueueHeaders(Parameters params,
+                                Dimension fullSize,
+                                String disposition) {
         // Content-Disposition
         if (disposition != null) {
-            getResponse().setHeader("Content-Disposition", disposition);
+            queuedHeaders.put("Content-Disposition", disposition);
         }
         // Content-Type
-        getResponse().setHeader("Content-Type", contentType);
-    }
-
-    /**
-     * Invokes {@link #addHeaders(String, String)} and also adds a {@code Link}
-     * header.
-     */
-    private void addHeaders(Parameters params,
-                            Dimension fullSize,
-                            String disposition,
-                            String contentType) {
-        addHeaders(disposition, contentType);
-
+        queuedHeaders.put("Content-Type",
+                params.getOutputFormat().toFormat().getPreferredMediaType().toString());
+        // Link
         Parameters paramsCopy = new Parameters(params);
-        paramsCopy.setIdentifier(new Identifier(getPublicIdentifier()));
+        paramsCopy.setIdentifier(getPublicIdentifier());
         String paramsStr = paramsCopy.toCanonicalString(fullSize);
-        getResponse().setHeader("Link",
+        queuedHeaders.put("Link",
                 String.format("<%s%s/%s>;rel=\"canonical\"",
                         getPublicRootReference(),
                         Route.IIIF_2_PATH,
                         paramsStr));
     }
 
-    private void validateSize(Dimension resultingSize,
-                              Dimension virtualSize,
-                              Processor processor) throws SizeRestrictedException {
-        final Configuration config = Configuration.getInstance();
-
-        if (config.getBoolean(Key.IIIF_2_RESTRICT_TO_SIZES, false)) {
-            final ImageInfoFactory factory = new ImageInfoFactory(
-                    processor.getSupportedFeatures(),
-                    processor.getSupportedIIIF2Qualities(),
-                    processor.getAvailableOutputFormats());
-
-            final List<ImageInfo.Size> sizes = factory.getSizes(virtualSize);
-
-            boolean ok = false;
-            for (ImageInfo.Size size : sizes) {
-                if (size.width == resultingSize.intWidth() &&
-                        size.height == resultingSize.intHeight()) {
-                    ok = true;
-                    break;
-                }
-            }
-            if (!ok) {
-                throw new SizeRestrictedException();
-            }
-        }
+    private void sendHeaders() {
+        queuedHeaders.forEach((k, v) -> getResponse().setHeader(k, v));
     }
 
-    private boolean isResolvingFirst() {
-        return Configuration.getInstance().
-                getBoolean(Key.CACHE_SERVER_RESOLVE_FIRST, true);
+    private void validateSize(Dimension resultingSize,
+                              Dimension virtualSize) throws SizeRestrictedException {
+        final var config = Configuration.getInstance();
+        if (config.getBoolean(Key.IIIF_RESTRICT_TO_SIZES, false)) {
+            var factory = new ImageInfoFactory();
+            factory.getSizes(virtualSize).stream()
+                    .filter(s -> s.width == resultingSize.intWidth() &&
+                            s.height == resultingSize.intHeight())
+                    .findAny()
+                    .orElseThrow(() -> new SizeRestrictedException(
+                            "Available sizes are limited to those in the information response."));
+        }
     }
 
 }

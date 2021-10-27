@@ -2,11 +2,11 @@ package edu.illinois.library.cantaloupe.config;
 
 import edu.illinois.library.cantaloupe.util.StringUtils;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -70,6 +70,11 @@ public class MapConfiguration implements Configuration {
     }
 
     @Override
+    public Optional<Path> getFile() {
+        return Optional.empty();
+    }
+
+    @Override
     public float getFloat(String key) {
         Object value = configuration.get(key);
         if (value != null) {
@@ -128,15 +133,13 @@ public class MapConfiguration implements Configuration {
         }
     }
 
-    @Nullable
     @Override
-    public Object getProperty(@Nonnull String key) {
+    public Object getProperty(String key) {
         return configuration.get(key);
     }
 
     @Override
-    @Nullable
-    public String getString(@Nonnull String key) {
+    public String getString(String key) {
         Object value = configuration.get(key);
         if (value != null) {
             return value.toString();

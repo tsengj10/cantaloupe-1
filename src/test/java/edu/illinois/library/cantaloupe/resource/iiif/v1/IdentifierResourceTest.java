@@ -5,7 +5,7 @@ import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.resource.ResourceTest;
 import edu.illinois.library.cantaloupe.resource.Route;
 import edu.illinois.library.cantaloupe.resource.iiif.InformationResourceTester;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 
@@ -21,34 +21,27 @@ public class IdentifierResourceTest extends ResourceTest {
     }
 
     @Test
-    public void testGETRedirectToInfoJSON() {
+    void testGETRedirectToInfoJSON() {
         URI fromURI = getHTTPURI("/" + IMAGE);
         URI toURI = getHTTPURI("/" + IMAGE + "/info.json");
         tester.testRedirectToInfoJSON(fromURI, toURI);
     }
 
     @Test
-    public void testGETRedirectToInfoJSONWithEncodedCharacters() {
+    void testGETRedirectToInfoJSONWithEncodedCharacters() {
         Configuration config = Configuration.getInstance();
-        config.setProperty(Key.SLASH_SUBSTITUTE, ":");
+        config.setProperty(Key.SLASH_SUBSTITUTE, "`");
 
-        URI fromURI = getHTTPURI("/subfolder%3A" + IMAGE);
-        URI toURI = getHTTPURI("/subfolder%3A" + IMAGE + "/info.json");
+        URI fromURI = getHTTPURI("/subfolder%60" + IMAGE);
+        URI toURI = getHTTPURI("/subfolder%60" + IMAGE + "/info.json");
         tester.testRedirectToInfoJSONWithEncodedCharacters(fromURI, toURI);
     }
 
     @Test
-    public void testGETRedirectToInfoJSONWithDifferentPublicIdentifier()
+    void testGETRedirectToInfoJSONWithDifferentPublicIdentifier()
             throws Exception {
         URI uri = getHTTPURI("/" + IMAGE);
         tester.testRedirectToInfoJSONWithDifferentPublicIdentifier(uri);
-    }
-
-    @Test
-    public void testGETRedirectToInfoJSONWithDifferentDeprecatedPublicIdentifier()
-            throws Exception {
-        URI uri = getHTTPURI("/" + IMAGE);
-        tester.testRedirectToInfoJSONWithDifferentDeprecatedPublicIdentifier(uri);
     }
 
 }

@@ -4,16 +4,14 @@ import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.ConfigurationException;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.script.DelegateMethod;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
+import edu.illinois.library.cantaloupe.delegate.DelegateMethod;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.script.ScriptException;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Set;
 
 import static edu.illinois.library.cantaloupe.source.SourceFactory.SelectionStrategy.DELEGATE_SCRIPT;
@@ -46,17 +44,18 @@ public final class SourceFactory {
     private static final Logger LOGGER =
             LoggerFactory.getLogger(SourceFactory.class);
 
+    private static final Set<Source> ALL_SOURCES = Set.of(
+            new AzureStorageSource(),
+            new FilesystemSource(),
+            new HttpSource(),
+            new JdbcSource(),
+            new S3Source());
+
     /**
      * @return Set of instances of each unique source.
      */
     public static Set<Source> getAllSources() {
-        return new HashSet<>(Arrays.asList(
-                new AzureStorageSource(),
-                new FilesystemSource(),
-                new HttpSource(),
-                new HttpSource2(),
-                new JdbcSource(),
-                new S3Source()));
+        return ALL_SOURCES;
     }
 
     /**
@@ -155,7 +154,7 @@ public final class SourceFactory {
                 name : SourceFactory.class.getPackage().getName() + "." + name;
         Class<?> class_ = Class.forName(fullName);
 
-        Source source = (Source) class_.newInstance();
+        Source source = (Source) class_.getDeclaredConstructor().newInstance();
         source.setIdentifier(identifier);
         source.setDelegateProxy(proxy);
         return source;

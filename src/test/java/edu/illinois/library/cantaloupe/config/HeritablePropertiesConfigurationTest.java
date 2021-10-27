@@ -1,7 +1,7 @@
 package edu.illinois.library.cantaloupe.config;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -9,7 +9,7 @@ import java.nio.file.Paths;
 import java.util.Iterator;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurationTest {
 
@@ -17,7 +17,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
 
     private HeritablePropertiesConfiguration instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
@@ -41,7 +41,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* getBoolean() */
 
     @Test
-    public void testGetBooleanUsesChildmostProperty() throws Exception {
+    void testGetBooleanUsesChildmostProperty() {
         instance.reload();
         assertTrue(instance.getBoolean("common_boolean_key"));
     }
@@ -49,7 +49,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* getDouble() */
 
     @Test
-    public void testGetDoubleUsesChildmostProperty() throws Exception {
+    void testGetDoubleUsesChildmostProperty() {
         instance.reload();
         assertEquals(3.0f, instance.getDouble("common_integer_key"), DELTA);
     }
@@ -57,14 +57,14 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* getFiles() */
 
     @Test
-    public void testGetFilesReturnsAllFiles() {
+    void testGetFilesReturnsAllFiles() {
         assertEquals(3, instance.getFiles().size());
     }
 
     /* getFloat() */
 
     @Test
-    public void testGetFloatUsesChildmostProperty() throws Exception {
+    void testGetFloatUsesChildmostProperty() {
         instance.reload();
         assertEquals(3.0f, instance.getDouble("common_integer_key"), DELTA);
     }
@@ -72,7 +72,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* getInt() */
 
     @Test
-    public void testGetIntUsesChildmostProperty() throws Exception {
+    void testGetIntUsesChildmostProperty() {
         instance.reload();
         assertEquals(3, instance.getInt("common_integer_key"));
     }
@@ -80,7 +80,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* getKeys() */
 
     @Test
-    public void testGetKeysReturnsKeysFromAllAllFiles() throws Exception {
+    void testGetKeysReturnsKeysFromAllAllFiles() {
         instance.reload();
         Iterator<String> it = instance.getKeys();
         int count = 0;
@@ -94,7 +94,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* getLong() */
 
     @Test
-    public void testGetLongUsesChildmostProperty() throws Exception {
+    public void testGetLongUsesChildmostProperty() {
         instance.reload();
         assertEquals(3, instance.getLong("common_integer_key"));
     }
@@ -106,7 +106,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
      */
     @Override
     @Test
-    public void testGetPropertyWithKeyWithPresentProperty() {
+    void testGetPropertyWithKeyWithPresentProperty() {
         final Configuration instance = getInstance();
         instance.setProperty(Key.IIIF_1_ENDPOINT_ENABLED, "1");
         instance.setProperty(Key.IIIF_2_ENDPOINT_ENABLED, 2);
@@ -122,7 +122,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
      */
     @Override
     @Test
-    public void testGetPropertyWithStringWithPresentProperty() {
+    void testGetPropertyWithStringWithPresentProperty() {
         final Configuration instance = getInstance();
         instance.setProperty("cats", "1");
         instance.setProperty("dogs", 2);
@@ -132,14 +132,13 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     }
 
     @Test
-    public void testGetPropertyUsesChildmostProperty() throws Exception {
+    void testGetPropertyUsesChildmostProperty() {
         instance.reload();
         assertEquals("birds", instance.getProperty("common_string_key"));
     }
 
     @Test
-    public void testGetPropertyFallsBackToParentFileIfUndefinedInChildFile()
-            throws Exception {
+    void testGetPropertyFallsBackToParentFileIfUndefinedInChildFile() {
         instance.reload();
         assertEquals("dogs", instance.getProperty("level2_key"));
     }
@@ -147,7 +146,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* getString() */
 
     @Test
-    public void testGetStringUsesChildmostProperty() throws Exception {
+    void testGetStringUsesChildmostProperty() {
         instance.reload();
         assertEquals("birds", instance.getString("common_string_key"));
     }
@@ -155,8 +154,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     /* setProperty() */
 
     @Test
-    public void testSetPropertySetsExistingPropertiesInSameFile()
-            throws Exception {
+    void testSetPropertySetsExistingPropertiesInSameFile() {
         instance.reload();
         List<PropertiesDocument> docs = instance.getConfigurationTree();
         instance.setProperty("level2_key", "bears");
@@ -166,8 +164,7 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     }
 
     @Test
-    public void testSetPropertySetsNewPropertiesInChildmostFile()
-            throws Exception {
+    void testSetPropertySetsNewPropertiesInChildmostFile() {
         instance.reload();
         List<PropertiesDocument> docs = instance.getConfigurationTree();
         instance.setProperty("newkey", "bears");
@@ -177,9 +174,9 @@ public class HeritablePropertiesConfigurationTest extends AbstractFileConfigurat
     }
 
     @Test
-    public void testGetPropertyReturnsNullIfKeyIsSpecifiedButNoValueIsPresent() throws ConfigurationException {
+    public void testGetPropertyReturnsNullIfKeyIsSpecifiedButNoValueIsPresent() {
         instance.reload();
-
         assertNull(instance.getProperty("key_without_value"));
     }
+
 }

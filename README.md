@@ -12,26 +12,20 @@
 
 ### Command line
 
-* `mvn clean compile exec:java -Dcantaloupe.config=...` will build the project
-  and run in standalone mode, using the embedded Servlet container listening on
-  the port(s) specified in `cantaloupe.properties`.
-* `mvn clean package -DskipTests` will build a release WAR in the `target`
-  folder, which can be run like any other.
+* `mvn clean compile exec:java -Dcantaloupe.config=...` will build and run the
+  project using the embedded web server listening on the port(s) specified in
+  `cantaloupe.properties`.
+* `mvn clean package -DskipTests` will build a release JAR in the `target`
+  folder, which can be run via:
+
+  `java -cp cantaloupe-{version}.jar -Dcantaloupe.config=... edu.illinois.library.cantaloupe.StandaloneEntry`
 
 ### IDE
 
-There are a few ways to do this. The simplest is probably:
-
-1. Add a new run configuration using the "Java Application" template or its
-   equivalent.
+1. Add a new run configuration using the "Java Application" template or
+   similar.
 2. Set the main class to `edu.illinois.library.cantaloupe.StandaloneEntry` and
    add the `-Dcantaloupe.config=...` VM option.
-3. Set the run configuration to include dependencies with `provided` scope.
-   (IntelliJ has a checkbox for this.) Alternatively, download
-   [servlet-api-3.1.jar](http://central.maven.org/maven2/javax/servlet/javax.servlet-api/3.1.0/javax.servlet-api-3.1.0.jar)
-   and add it to your classpath: `--class-path=/path/to/servlet-api-3.1.jar`
-
-   Or, in Java 9+, your module path: `--module-path=/path/to/containing/dir`
 
 ## Test
 
@@ -53,20 +47,18 @@ on third-party services and do not require any external tools or libraries.
 depend on open-source tools or libraries. These are the tests run in
 continuous integration. The following dependencies are required:
 
+* MinIO (for S3SourceTest & S3CacheTest)
 * FFmpeg (for FfmpegProcessorTest)
-* GraphicsMagick (for GraphicsMagickProcessorTest)
-* ImageMagick (for ImageMagickProcessorTest)
+* Grok (for GrokProcessorTest)
 * OpenJPEG (for OpenJpegProcessorTest)
-* Redis (for RedisCacheTest)
 * TurboJPEG with Java binding (for TurboJpegProcessorTest)
+* Redis (for RedisCacheTest)
 
 #### 3. All tests
 
-`mvn clean test` will run all tests, including the ones above. The following
-dependencies are required in addition to the ones above:
+`mvn clean test` will run all tests including the ones above. The following
+additional dependencies are required:
 
-* Kakadu demo tools (for KakaduDemoProcessorTest) - see the KakaduDemoProcessor
-  section of the user manual for information about these.
 * Kakadu native library (for KakaduNativeProcessorTest) - see the
   KakaduNativeProcessor section of the user manual for information.
 * A Microsoft Azure account
@@ -74,9 +66,12 @@ dependencies are required in addition to the ones above:
 #### Docker
 
 Because it can be a chore to install all of the dependencies needed to get all
-of the tests in the `freedeps` profile passing, there is a Docker testing image
-available that contains all needed dependencies. See
-`/.github/workflows/ci.yml`.
+of the tests in the `freedeps` profile passing, there is a `docker-compose.yml`
+file available that will spin up all needed dependencies in separate
+containers, and run the tests in another container. From the project root
+directory, invoke:
+
+  `docker-compose -f docker/{platform}/docker-compose.yml up --build --exit-code-from cantaloupe`.
 
 ### Output testing
 
@@ -90,8 +85,7 @@ Run them with `mvn clean test -Pbenchmark`.
 
 ## Contribute
 
-Contributions are welcome. The suggested process for contributing code changes
-is:
+The suggested process for contributing code changes is:
 
 1. Submit a "heads-up" issue in the tracker, ideally before beginning any
    work.
@@ -109,40 +103,38 @@ is:
 
 Different application versions may require different configuration file keys.
 It's good practice to use a dedicated configuration file for each version.
-Key changes are documented in [UPGRADING.md](https://github.com/cantaloupe-project/cantaloupe/blob/develop/UPGRADING.md).
+Key changes are documented in
+[UPGRADING.md](https://github.com/cantaloupe-project/cantaloupe/blob/develop/UPGRADING.md).
 
 ### Versioning
 
 Cantaloupe roughly uses semantic versioning. Major releases (n) involve major
-rearchitecting that breaks backwards compatibility in a significant way. Minor
-releases (n.n) either do not break compatibility, or only in a minor way.
-Patch releases (n.n.n) are for bugfixes only.
+redesign that breaks backwards compatibility significantly. Minor releases
+(n.n) either do not break compatibility, or only in a minor way. Patch releases
+(n.n.n) are for bugfixes only.
 
 ### Branching
 
-Cantaloupe uses the
+Cantaloupe uses a basic version of the
 [Gitflow](https://www.atlassian.com/git/tutorials/comparing-workflows#gitflow-workflow)
 branching model. `develop` is the main branch that tracks the current state of
 the next non-bugfix release. Significant features branch off of that into
 feature branches (`feature/feature-name`), from which they can be integrated
 into a particular release.
 
-When a major or minor version is ready for release in `develop`, it branches
-off into a `release/n.n` branch, where its version is set. Finally, that is
-merged into `master`, where the release is tagged and the release archive is
+When a major or minor version in `develop` is ready for release, it merges into
+a `release/n.n` branch, where the release is tagged and the release archive is
 created.
 
-Bugfixes that would increment a minor version of a release are applied to the
-release branch for that release, and merged back into `develop`.
+Bugfixes that would increment a minor version of a release are applied to its
+release branch and merged back into `develop`.
 
 ## Prerelease
 
 1. Run the Maven Verifier plugin (`mvn verify -DskipTests=true`)
 2. Run an OWASP dependency check (`mvn org.owasp:dependency-check-maven:check`)
-3. Run Findbugs (`mvn clean compile findbugs:findbugs findbugs:gui`)
-4. Run the tests:
-   * JUnit
-   * [Endpoint tests](https://github.com/cantaloupe-project/output-tester)
+3. Run Spotbugs (`mvn clean compile spotbugs:spotbugs spotbugs:gui`)
+4. Run the [Endpoint tests](https://github.com/cantaloupe-project/output-tester)
 5. Finalize the code to be released, addressing any relevant milestone issues,
    TODOs, etc.
 6. Finalize the documentation, including the website, user manual, and change
@@ -152,16 +144,15 @@ release branch for that release, and merged back into `develop`.
 
 1. Merge into `release/vX.X`
 2. Update the version in `pom.xml` and commit this change
-3. Merge into `master`
-4. Push the code: `git push origin master; git push origin release/x.x`
-5. Wait for CI tests to pass
-6. Create the release `.zip` archive with `mvn clean package -DskipTests`
-7. Verify that the `.zip` archive is as expected
-8. Tag the release: `git tag -a v{version} -m 'Tag v{version}'`
-9. git push --tags
-10. Add the `.zip` archive and change log info to the release tag on GitHub
-11. Deploy the updated website (usually not necessary for bugfix releases)
-12. Close the release's GitHub milestone
+3. `git push origin release/x.x`
+4. Wait for CI tests to pass
+5. Tag the release: `git tag -a v{version} -m 'Tag v{version}'; git push --tags`
+6. Wait for GitHub Actions to add the release artifact to the tag
+7. Add the change log to the release on GitHub
+8. Close the release's issue milestone
+9. Deploy the updated
+    [website](https://github.com/cantaloupe-project/cantaloupe-project.github.io)
+    (if necessary)
 
 ## License
 

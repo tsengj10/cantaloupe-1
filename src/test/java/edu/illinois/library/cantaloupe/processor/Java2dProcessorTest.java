@@ -6,25 +6,21 @@ import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReader;
 import edu.illinois.library.cantaloupe.processor.codec.ImageReaderFactory;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-public class Java2dProcessorTest extends ImageIOProcessorTest {
+public class Java2dProcessorTest extends AbstractImageIOProcessorTest {
 
     private Java2dProcessor instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         instance = newInstance();
@@ -36,52 +32,32 @@ public class Java2dProcessorTest extends ImageIOProcessorTest {
     }
 
     @Test
-    public void testGetSupportedFeatures() throws Exception {
-        instance.setSourceFormat(getAnySupportedSourceFormat(instance));
-
-        Set<ProcessorFeature> expectedFeatures = new HashSet<>(Arrays.asList(
-                ProcessorFeature.MIRRORING,
-                ProcessorFeature.REGION_BY_PERCENT,
-                ProcessorFeature.REGION_BY_PIXELS,
-                ProcessorFeature.REGION_SQUARE,
-                ProcessorFeature.ROTATION_ARBITRARY,
-                ProcessorFeature.ROTATION_BY_90S,
-                ProcessorFeature.SIZE_ABOVE_FULL,
-                ProcessorFeature.SIZE_BY_CONFINED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_DISTORTED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_FORCED_WIDTH_HEIGHT,
-                ProcessorFeature.SIZE_BY_HEIGHT,
-                ProcessorFeature.SIZE_BY_PERCENT,
-                ProcessorFeature.SIZE_BY_WIDTH,
-                ProcessorFeature.SIZE_BY_WIDTH_HEIGHT));
-        assertEquals(expectedFeatures, instance.getSupportedFeatures());
-    }
-
-    @Test
-    public void testIsSeekingWithNonSeekableSource() throws Exception {
-        instance.setSourceFormat(Format.BMP);
+    void testIsSeekingWithNonSeekableSource() throws Exception {
+        instance.setSourceFormat(Format.get("bmp"));
         instance.setSourceFile(TestUtil.getImage("bmp"));
         assertFalse(instance.isSeeking());
     }
 
     @Test
-    public void testIsSeekingWithSeekableSource() throws Exception {
-        instance.setSourceFormat(Format.TIF);
+    void testIsSeekingWithSeekableSource() throws Exception {
+        instance.setSourceFormat(Format.get("tif"));
         instance.setSourceFile(TestUtil.getImage("tif-rgb-1res-64x56x8-tiled-jpeg.tif"));
         assertTrue(instance.isSeeking());
     }
 
     @Test
-    public void testProcessWithAnimatedGIF() throws Exception {
+    void testProcessWithAnimatedGIF() throws Exception {
         Path image = TestUtil.getImage("gif-animated-looping.gif");
-        OperationList ops = new OperationList(new Encode(Format.GIF));
+        OperationList ops = OperationList.builder()
+                .withOperations(new Encode(Format.get("gif")))
+                .build();
         Info info = Info.builder()
                 .withSize(136, 200)
-                .withFormat(Format.GIF)
+                .withFormat(Format.get("gif"))
                 .build();
 
         instance.setSourceFile(image);
-        instance.setSourceFormat(Format.GIF);
+        instance.setSourceFormat(Format.get("gif"));
 
         try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
             instance.process(ops, info, os);
@@ -89,7 +65,7 @@ public class Java2dProcessorTest extends ImageIOProcessorTest {
             try (ByteArrayInputStream is = new ByteArrayInputStream(os.toByteArray())) {
                 ImageReader reader = null;
                 try {
-                    reader = new ImageReaderFactory().newImageReader(is, Format.GIF);
+                    reader = new ImageReaderFactory().newImageReader(Format.get("gif"), is);
                     assertEquals(2, reader.getNumImages());
                 } finally {
                     if (reader != null) {
@@ -97,6 +73,32 @@ public class Java2dProcessorTest extends ImageIOProcessorTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    @Override
+    public void testProcessWithTurboJPEGAvailable() {
+        // This processor doesn't use TurboJPEG ever.
+    }
+
+    @Test
+    @Override
+    public void testProcessWithTurboJPEGNotAvailable() {
+        // This processor doesn't use TurboJPEG ever.
+    }
+
+    @Test
+    void testSupportsSourceFormatWithSupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertTrue(instance.supportsSourceFormat(Format.get("jpg")));
+        }
+    }
+
+    @Test
+    void testSupportsSourceFormatWithUnsupportedFormat() {
+        try (Processor instance = newInstance()) {
+            assertFalse(instance.supportsSourceFormat(Format.get("mp4")));
         }
     }
 

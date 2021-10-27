@@ -4,93 +4,98 @@ import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
+import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ProcessorFactoryTest extends BaseTest {
 
     private ProcessorFactory instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         instance = new ProcessorFactory();
     }
 
     @Test
-    public void testGetAllProcessors() {
+    void testGetAllProcessors() {
         assertTrue(ProcessorFactory.getAllProcessors().size() > 5);
     }
 
     /* newProcessor(String) */
 
     @Test
-    public void testNewProcessorWithStringWithUnqualifiedName() throws Exception {
+    void testNewProcessorWithStringWithUnqualifiedName() throws Exception {
         assertTrue(instance.newProcessor(Java2dProcessor.class.getSimpleName()) instanceof Java2dProcessor);
     }
 
-    @Test(expected = ClassNotFoundException.class)
-    public void testNewProcessorWithStringWithNonExistingUnqualifiedName() throws Exception {
-        instance.newProcessor("Bogus");
+    @Test
+    void testNewProcessorWithStringWithNonExistingUnqualifiedName() {
+        assertThrows(ClassNotFoundException.class, () ->
+                instance.newProcessor("Bogus"));
     }
 
     @Test
-    public void testNewProcessorWithStringWithQualifiedName() throws Exception {
+    void testNewProcessorWithStringWithQualifiedName() throws Exception {
         assertTrue(instance.newProcessor(Java2dProcessor.class.getName()) instanceof Java2dProcessor);
     }
 
-    @Test(expected = ClassNotFoundException.class)
-    public void testNewProcessorWithStringWithNonExistingQualifiedName() throws Exception {
-        instance.newProcessor(ProcessorFactory.class.getPackage().getName() + ".Bogus");
+    @Test
+    void testNewProcessorWithStringWithNonExistingQualifiedName() {
+        assertThrows(ClassNotFoundException.class, () ->
+                instance.newProcessor(ProcessorFactory.class.getPackage().getName() + ".Bogus"));
     }
 
     /* newProcessor(Format) */
 
     @Test
-    public void testNewProcessorWithFormatWithWorkingFirstPreferenceMatch() throws Exception {
+    void testNewProcessorWithFormatWithWorkingFirstPreferenceMatch() throws Exception {
         instance.setSelectionStrategy(f ->
-                Arrays.asList(PdfBoxProcessor.class, Java2dProcessor.class));
-        assertTrue(instance.newProcessor(Format.PDF) instanceof PdfBoxProcessor);
+                List.of(PdfBoxProcessor.class, Java2dProcessor.class));
+        assertTrue(instance.newProcessor(Format.get("pdf")) instanceof PdfBoxProcessor);
     }
 
     @Test
-    public void testNewProcessorWithFormatWithBrokenFirstPreferenceMatchAndWorkingSecondPreferenceMatch()
+    void testNewProcessorWithFormatWithBrokenFirstPreferenceMatchAndWorkingSecondPreferenceMatch()
             throws Exception {
         instance.setSelectionStrategy(f ->
-                Arrays.asList(MockBrokenProcessor.class, Java2dProcessor.class));
-        assertTrue(instance.newProcessor(Format.JPG) instanceof Java2dProcessor);
+                List.of(MockBrokenProcessor.class, Java2dProcessor.class));
+        assertTrue(instance.newProcessor(Format.get("jpg")) instanceof Java2dProcessor);
     }
 
     @Test
-    public void testNewProcessorWithFormatWithWorkingSecondPreferenceMatch() throws Exception {
+    void testNewProcessorWithFormatWithWorkingSecondPreferenceMatch() throws Exception {
         instance.setSelectionStrategy(f ->
-                Arrays.asList(PdfBoxProcessor.class, Java2dProcessor.class));
-        assertTrue(instance.newProcessor(Format.JPG) instanceof Java2dProcessor);
+                List.of(PdfBoxProcessor.class, Java2dProcessor.class));
+        assertTrue(instance.newProcessor(Format.get("jpg")) instanceof Java2dProcessor);
     }
 
-    @Test(expected = InitializationException.class)
-    public void testNewProcessorWithFormatWithBrokenSecondPreferenceMatch() throws Exception {
+    @Test
+    void testNewProcessorWithFormatWithBrokenSecondPreferenceMatch() {
         instance.setSelectionStrategy(f ->
-                Arrays.asList(PdfBoxProcessor.class, MockBrokenProcessor.class));
-        instance.newProcessor(Format.JPG);
+                List.of(PdfBoxProcessor.class, MockBrokenProcessor.class));
+        assertThrows(InitializationException.class,
+                () -> instance.newProcessor(Format.get("jpg")));
     }
 
-    @Test(expected = UnsupportedSourceFormatException.class)
-    public void testNewProcessorWithFormatWithNoMatch() throws Exception {
-        instance.setSelectionStrategy(f -> Arrays.asList(
-                MockPDFOnlyProcessor.class, MockPNGOnlyProcessor.class));
-        instance.newProcessor(Format.JPG);
+    @Test
+    void testNewProcessorWithFormatWithNoMatch() {
+        instance.setSelectionStrategy(f ->
+                List.of(MockPDFOnlyProcessor.class, MockPNGOnlyProcessor.class));
+        assertThrows(SourceFormatException.class,
+                () -> instance.newProcessor(Format.get("jpg")));
     }
 
-    @Test(expected = UnsupportedSourceFormatException.class)
-    public void testNewProcessorWithFormatWithUnknownFormat() throws Exception {
+    @Test
+    void testNewProcessorWithFormatWithUnknownFormat() {
         Configuration.getInstance().setProperty(Key.PROCESSOR_FALLBACK,
                 Java2dProcessor.class.getSimpleName());
-        instance.newProcessor(Format.UNKNOWN);
+        assertThrows(SourceFormatException.class,
+                () -> instance.newProcessor(Format.UNKNOWN));
     }
 
 }

@@ -7,77 +7,167 @@ import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
+import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.image.Rectangle;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.overlay.BasicStringOverlayServiceTest;
 import edu.illinois.library.cantaloupe.operation.overlay.Overlay;
 import edu.illinois.library.cantaloupe.operation.redaction.Redaction;
-import edu.illinois.library.cantaloupe.operation.redaction.RedactionServiceTest;
-import edu.illinois.library.cantaloupe.resource.RequestContext;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.DelegateProxyService;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-public class OperationListTest extends BaseTest {
+class OperationListTest extends BaseTest {
+
+    @Nested
+    class BuilderTest extends BaseTest {
+
+        private OperationList.Builder instance;
+
+        @BeforeEach
+        public void setUp() throws Exception {
+            super.setUp();
+            instance = OperationList.builder();
+        }
+
+        @Test
+        void testBuildWithNoPropertiesSet() {
+            OperationList opList = instance.build();
+            assertNull(opList.getIdentifier());
+            assertTrue(opList.getOperations().isEmpty());
+            assertTrue(opList.getOptions().isEmpty());
+            assertEquals(0, opList.getPageIndex());
+            assertEquals(new ScaleConstraint(1, 1), opList.getScaleConstraint());
+        }
+
+        @Test
+        void testBuildWithAllPropertiesSet() {
+            // identifier
+            Identifier identifier = new Identifier("cats");
+            // meta-identifier
+            MetaIdentifier metaIdentifier = new MetaIdentifier(identifier);
+            // operations
+            List<Operation> operations = List.of(
+                    new ScaleByPercent(0.5),
+                    new ScaleByPercent(0.4));
+            // options
+            Map<String,String> options = Map.of("key", "value");
+            // page index
+            int pageIndex = 3;
+
+            OperationList opList = instance
+                    .withIdentifier(identifier)
+                    .withMetaIdentifier(metaIdentifier)
+                    .withOperations(operations.toArray(Operation[]::new))
+                    .withOptions(options)
+                    .withPageIndex(3)
+                    .build();
+            assertEquals(identifier, opList.getIdentifier());
+            assertEquals(metaIdentifier, opList.getMetaIdentifier());
+            assertEquals(operations, opList.getOperations());
+            assertEquals(options, opList.getOptions());
+            assertEquals(pageIndex, opList.getPageIndex());
+        }
+
+    }
 
     private static final double DELTA = 0.00000001;
 
     private OperationList instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-
-        Configuration config = Configuration.getInstance();
-        config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-        config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                TestUtil.getFixture("delegates.rb").toString());
-
         instance = new OperationList();
+    }
+
+    @Test
+    void noOpConstructor() {
         assertNotNull(instance.getOptions());
         assertFalse(instance.getScaleConstraint().hasEffect());
     }
 
     @Test
-    public void add() {
-        instance = new OperationList();
+    void identifierConstructor() {
+        instance = new OperationList(new Identifier("cats"));
+        assertEquals("cats", instance.getIdentifier().toString());
+    }
+
+    @Test
+    void metaIdentifierConstructor() {
+        instance = new OperationList(new MetaIdentifier("cats"));
+        assertEquals("cats", instance.getMetaIdentifier().toString());
+    }
+
+    @Test
+    void add1() {
         assertFalse(instance.iterator().hasNext());
 
         instance.add(new Rotate());
         assertTrue(instance.iterator().hasNext());
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void addWhileFrozen() {
-        instance = new OperationList();
-        instance.freeze();
-
-        instance.add(new Rotate());
-    }
-
     @Test
-    public void addWithNull() {
-        instance = new OperationList();
-        assertFalse(instance.iterator().hasNext());
-
+    void add1WithNullArgument() {
         instance.add(null);
         assertFalse(instance.iterator().hasNext());
     }
 
     @Test
-    public void addAfterWithExistingClass() {
-        instance = new OperationList(new Rotate());
-        instance.addAfter(new Scale(), Rotate.class);
+    void add1WhileFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.add(new Rotate()));
+    }
+
+    @Test
+    void add2() {
+        instance.add(new Rotate());
+        instance.add(new Rotate());
+        instance.add(new Rotate());
+        instance.add(1, new ScaleByPercent());
+
+        Iterator<Operation> it = instance.iterator();
+        it.next();
+        assertTrue(it.next() instanceof ScaleByPercent);
+    }
+
+    @Test
+    void add2WithNullOperationArgument() {
+        instance.add(0, null);
+        assertFalse(instance.iterator().hasNext());
+    }
+
+    @Test
+    void add2WithIllegalIndex() {
+        assertThrows(IndexOutOfBoundsException.class,
+                () -> instance.add(8, new Rotate()));
+    }
+
+    @Test
+    void add2WhileFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.add(0, new Rotate()));
+    }
+
+    @Test
+    void addAfterWithExistingClass() {
+        instance = OperationList.builder()
+                .withOperations(new Rotate())
+                .build();
+        instance.addAfter(new ScaleByPercent(), Rotate.class);
         Iterator<Operation> it = instance.iterator();
 
         assertTrue(it.next() instanceof Rotate);
@@ -85,8 +175,7 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void addAfterWithExistingSuperclass() {
-        instance = new OperationList();
+    void addAfterWithExistingSuperclass() {
         instance.add(new MockOverlay());
 
         class SubMockOverlay extends MockOverlay {}
@@ -98,117 +187,114 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void addAfterWithoutExistingClass() {
-        instance = new OperationList();
+    void addAfterWithoutExistingClass() {
         instance.add(new Rotate());
-        instance.addAfter(new Scale(), Crop.class);
+        instance.addAfter(new ScaleByPercent(), Crop.class);
         Iterator<Operation> it = instance.iterator();
         assertTrue(it.next() instanceof Rotate);
         assertTrue(it.next() instanceof Scale);
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void addAfterWhileFrozen() {
-        instance = new OperationList();
+    @Test
+    void addAfterWithNullArgument() {
+        instance.addAfter(null, Scale.class);
+        assertFalse(instance.iterator().hasNext());
+    }
+
+    @Test
+    void addAfterWhileFrozen() {
         instance.freeze();
-        instance.addAfter(new Rotate(), Crop.class);
+        assertThrows(IllegalStateException.class,
+                () -> instance.addAfter(new Rotate(), Crop.class));
     }
 
     @Test
-    public void addAfterWithNull() {
-        instance = new OperationList();
-        assertFalse(instance.iterator().hasNext());
-
-        instance.addAfter(null, Crop.class);
-        assertFalse(instance.iterator().hasNext());
-    }
-
-    @Test
-    public void addBeforeWithExistingClass() {
-        instance = new OperationList();
+    void addBeforeWithExistingClass() {
         instance.add(new Rotate());
-        instance.addBefore(new Scale(), Rotate.class);
+        instance.addBefore(new ScaleByPercent(), Rotate.class);
         assertTrue(instance.iterator().next() instanceof Scale);
     }
 
     @Test
-    public void addBeforeWithExistingSuperclass() {
+    void addBeforeWithExistingSuperclass() {
         class SubMockOverlay extends MockOverlay {}
 
-        instance = new OperationList();
         instance.add(new MockOverlay());
         instance.addBefore(new SubMockOverlay(), MockOverlay.class);
         assertTrue(instance.iterator().next() instanceof SubMockOverlay);
     }
 
     @Test
-    public void addBeforeWithoutExistingClass() {
-        instance = new OperationList();
+    void addBeforeWithoutExistingClass() {
         instance.add(new Rotate());
-        instance.addBefore(new Scale(), Crop.class);
+        instance.addBefore(new ScaleByPercent(), Crop.class);
         Iterator<Operation> it = instance.iterator();
         assertTrue(it.next() instanceof Rotate);
         assertTrue(it.next() instanceof Scale);
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void addBeforeWhileFrozen() {
-        instance = new OperationList();
+    @Test
+    void addBeforeWithNullArgument() {
+        instance.addBefore(null, Scale.class);
+        assertFalse(instance.iterator().hasNext());
+    }
+
+    @Test
+    void addBeforeWhileFrozen() {
         instance.freeze();
-        instance.addBefore(new Rotate(), Crop.class);
+        assertThrows(IllegalStateException.class,
+                () -> instance.addBefore(new Rotate(), Crop.class));
     }
 
     @Test
-    public void addBeforeWithNull() {
-        instance = new OperationList();
-        assertFalse(instance.iterator().hasNext());
-
-        instance.addAfter(null, Crop.class);
-        assertFalse(instance.iterator().hasNext());
-    }
-
-    @Test
-    public void applyNonEndpointMutationsWithScaleConstraintAndNoScaleOperationAddsOne()
-            throws Exception {
+    void applyNonEndpointMutationsWithScaleConstraintAndNoScaleOperationAddsOne() {
         final Dimension fullSize = new Dimension(2000, 1000);
         final Info info = Info.builder()
                 .withSize(fullSize)
                 .build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new CropByPixels(0, 0, 70, 30),
-                new Encode(Format.JPG));
-        opList.setScaleConstraint(new ScaleConstraint(1, 2));
+        final Identifier identifier = new Identifier("cats");
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new CropByPixels(0, 0, 70, 30),
+                        new Encode(Format.get("jpg")))
+                .build();
 
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
-        Scale expectedScale = new Scale();
+        Scale expectedScale = new ScaleByPercent();
         Scale actualScale = (Scale) opList.getFirst(Scale.class);
         assertEquals(expectedScale, actualScale);
     }
 
     @Test
-    public void applyNonEndpointMutationsWithOrientationMutatesCrop()
-            throws Exception {
+    void applyNonEndpointMutationsWithOrientationMutatesCrop() {
         final Dimension fullSize = new Dimension(2000, 1000);
         final Info info = Info.builder()
                 .withSize(fullSize)
-                .withOrientation(Orientation.ROTATE_90)
+                .withMetadata(new Metadata() {
+                    @Override
+                    public Orientation getOrientation() {
+                        return Orientation.ROTATE_90;
+                    }
+                })
                 .build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new CropByPixels(0, 0, 70, 30),
-                new Encode(Format.JPG));
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(
+                        new CropByPixels(0, 0, 70, 30),
+                        new Encode(Format.get("jpg")))
+                .build();
 
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -219,23 +305,27 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithOrientationMutatesRotate()
-            throws Exception {
+    void applyNonEndpointMutationsWithOrientationMutatesRotate() {
         final Dimension fullSize = new Dimension(2000, 1000);
         final Info info = Info.builder()
                 .withSize(fullSize)
-                .withOrientation(Orientation.ROTATE_90)
+                .withMetadata(new Metadata() {
+                    @Override
+                    public Orientation getOrientation() {
+                        return Orientation.ROTATE_90;
+                    }
+                })
                 .build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new CropByPixels(0, 0, 70, 30),
-                new Rotate(45),
-                new Encode(Format.JPG));
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(
+                        new CropByPixels(0, 0, 70, 30),
+                        new Rotate(45),
+                        new Encode(Format.get("jpg")))
+                .build();
 
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -246,22 +336,19 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithBackgroundColor()
-            throws Exception {
+    void applyNonEndpointMutationsWithBackgroundColor() {
         final Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_BACKGROUND_COLOR, "white");
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new Rotate(45),
-                new Encode(Format.JPG));
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new Rotate(45), new Encode(Format.get("jpg")))
+                .build();
 
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -270,21 +357,20 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithJPEGOutputFormat()
-            throws Exception {
+    void applyNonEndpointMutationsWithJPEGOutputFormat() {
         final Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_JPG_QUALITY, 50);
         config.setProperty(Key.PROCESSOR_JPG_PROGRESSIVE, true);
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"), new Encode(Format.JPG));
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
 
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -297,40 +383,18 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithMetadataCopies()
-            throws Exception {
-        final Configuration config = Configuration.getInstance();
-        config.setProperty(Key.PROCESSOR_PRESERVE_METADATA, true);
-
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"), new Encode(Format.JPG));
-
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
-
-        opList.applyNonEndpointMutations(info, proxy);
-
-        Iterator<Operation> it = opList.iterator();
-        assertTrue(it.next() instanceof MetadataCopy);
-    }
-
-    @Test
-    public void applyNonEndpointMutationsWithOverlay() throws Exception {
+    void applyNonEndpointMutationsWithOverlay() {
         BasicStringOverlayServiceTest.setUpConfiguration();
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"), new Encode(Format.TIF));
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new Encode(Format.get("tif")))
+                .build();
 
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -339,18 +403,16 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithRedactions() throws Exception {
-        RedactionServiceTest.setUpConfiguration();
+    void applyNonEndpointMutationsWithRedactions() {
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("redacted"))
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"), new Encode(Format.JPG));
-
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -359,42 +421,44 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithMaxScale() throws Exception {
+    void applyNonEndpointMutationsWithLinearScale() {
         Configuration config = Configuration.getInstance();
-        config.setProperty(Key.MAX_SCALE, 1);
+        config.setProperty(Key.PROCESSOR_DOWNSCALE_LINEAR, true);
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new Scale(1.5),
-                new Encode(Format.JPG));
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(
+                        new ScaleByPercent(0.5),
+                        new Encode(Format.get("jpg")))
+                .build();
+
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
         Iterator<Operation> it = opList.iterator();
-        assertEquals(1.0, ((Scale) it.next()).getMaxScale(), DELTA);
+        assertTrue(((Scale) it.next()).isLinear());
     }
 
     @Test
-    public void applyNonEndpointMutationsWithDownscaleFilter() throws Exception {
+    void applyNonEndpointMutationsWithDownscaleFilter() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_DOWNSCALE_FILTER, "bicubic");
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new Scale(0.5),
-                new Encode(Format.JPG));
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(
+                        new ScaleByPercent(0.5),
+                        new Encode(Format.get("jpg")))
+                .build();
+
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -403,20 +467,21 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithUpscaleFilter() throws Exception {
+    void applyNonEndpointMutationsWithUpscaleFilter() {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_UPSCALE_FILTER, "triangle");
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new Scale(1.5),
-                new Encode(Format.JPG));
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(
+                        new ScaleByPercent(1.5),
+                        new Encode(Format.get("jpg")))
+                .build();
+
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -425,19 +490,19 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithSharpening() throws Exception {
+    void applyNonEndpointMutationsWithSharpening() {
         final Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_SHARPEN, 0.2f);
 
-        final Dimension fullSize = new Dimension(2000, 1000);
-        final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"),
-                new Encode(Format.TIF));
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new Encode(Format.get("tif")))
+                .build();
+
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -449,19 +514,19 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void applyNonEndpointMutationsWithTIFFOutputFormat()
-            throws Exception {
+    void applyNonEndpointMutationsWithTIFFOutputFormat() {
         final Configuration config = Configuration.getInstance();
         config.setProperty(Key.PROCESSOR_TIF_COMPRESSION, "LZW");
 
         final Dimension fullSize = new Dimension(2000, 1000);
         final Info info = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(
-                new Identifier("cats"), new Encode(Format.TIF));
-        final RequestContext context = new RequestContext();
-        context.setOperationList(opList, fullSize);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new Encode(Format.get("tif")))
+                .build();
+
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
 
@@ -472,25 +537,47 @@ public class OperationListTest extends BaseTest {
         assertEquals(Compression.LZW, encode.getCompression());
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void applyNonEndpointMutationsWhileFrozen() throws Exception {
-        final Dimension fullSize   = new Dimension(2000, 1000);
-        final Info info            = Info.builder().withSize(fullSize).build();
-        final OperationList opList = new OperationList(new CropByPixels(0, 0, 70, 30));
+    @Test
+    void applyNonEndpointMutationsWithMetadata() {
+        final Dimension fullSize = new Dimension(2000, 1000);
+        final Info info = Info.builder().withSize(fullSize).build();
+        final Encode encode = new Encode(Format.get("jpg"));
+        final Metadata metadata = new Metadata();
+        metadata.setXMP("<rdf:RDF>source metadata</rdf:RDF>");
+        encode.setMetadata(metadata);
+        final OperationList opList = OperationList.builder()
+                .withIdentifier(new Identifier("metadata"))
+                .withOperations(encode)
+                .build();
 
-        opList.freeze();
-
-        final RequestContext context = new RequestContext();
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy          = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
         opList.applyNonEndpointMutations(info, proxy);
+
+        assertEquals("<rdf:RDF>derivative metadata</rdf:RDF>",
+                encode.getMetadata().getXMP().orElseThrow());
     }
 
     @Test
-    public void clear() {
+    void applyNonEndpointMutationsWhileFrozen() {
+        final Dimension fullSize   = new Dimension(2000, 1000);
+        final Info info            = Info.builder().withSize(fullSize).build();
+        final OperationList opList = OperationList.builder()
+                .withOperations(new CropByPixels(0, 0, 70, 30))
+                .build();
+
+        opList.freeze();
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+
+        assertThrows(IllegalStateException.class,
+                () -> opList.applyNonEndpointMutations(info, proxy));
+    }
+
+    @Test
+    void clear() {
         instance.add(new CropByPixels(10, 10, 10, 10));
-        instance.add(new Scale(0.5));
+        instance.add(new ScaleByPercent(0.5));
 
         int opCount = 0;
         Iterator<Operation> it = instance.iterator();
@@ -510,43 +597,48 @@ public class OperationListTest extends BaseTest {
         assertEquals(0, opCount);
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void clearWhileFrozen() {
+    @Test
+    void clearWhileFrozen() {
         instance.freeze();
-        instance.clear();
+        assertThrows(IllegalStateException.class, () -> instance.clear());
     }
 
     @Test
-    public void equalsWithEqualOperationList() {
-        OperationList ops1 = new OperationList(new Rotate(1));
-        OperationList ops2 = new OperationList(new Rotate(1));
+    void equalsWithEqualInstance() {
+        OperationList ops1 = OperationList.builder()
+                .withOperations(new Rotate(1)).build();
+        OperationList ops2 = OperationList.builder()
+                .withOperations(new Rotate(1)).build();
         assertEquals(ops1, ops2);
     }
 
     @Test
-    public void equalsWithUnequalOperationList() {
-        OperationList ops1 = new OperationList();
-        OperationList ops2 = new OperationList(new Rotate(1));
+    void equalsWithUnequalInstance() {
+        OperationList ops1 = OperationList.builder()
+                .withOperations(new Rotate(1)).build();
+        OperationList ops2 = OperationList.builder()
+                .withOperations(new Rotate(2)).build();
         assertNotEquals(ops1, ops2);
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void freezeFreezesOperations() {
+    @Test
+    void freezeFreezesOperations() {
         instance.add(new CropByPixels(0, 0, 10, 10));
         instance.freeze();
-        ((CropByPixels) instance.getFirst(CropByPixels.class)).setHeight(300);
+        assertThrows(IllegalStateException.class,
+                () -> ((CropByPixels) instance.getFirst(CropByPixels.class)).setHeight(300));
     }
 
     @Test
-    public void getFirst() {
-        instance.add(new Scale(0.5));
+    void getFirst() {
+        instance.add(new ScaleByPercent(0.5));
 
-        assertNull(instance.getFirst(MetadataCopy.class));
+        assertNull(instance.getFirst(Crop.class));
         assertNotNull(instance.getFirst(Scale.class));
     }
 
     @Test
-    public void getFirstWithSuperclass() {
+    void getFirstWithSuperclass() {
         instance.add(new MockOverlay());
 
         Overlay overlay = (Overlay) instance.getFirst(Overlay.class);
@@ -555,70 +647,135 @@ public class OperationListTest extends BaseTest {
     }
 
     @Test
-    public void getOptions() {
-        assertNotNull(instance.getOptions());
-    }
-
-    @Test(expected = UnsupportedOperationException.class)
-    public void getOptionsWhenFrozen() {
-        instance.freeze();
-        instance.getOptions().put("test", "test");
+    void getIdentifierReturnsIdentifierIfSet() {
+        final Identifier identifier = new Identifier("cats");
+        instance.setIdentifier(identifier);
+        instance.setMetaIdentifier(null);
+        assertEquals(identifier, instance.getIdentifier());
     }
 
     @Test
-    public void getResultingSize() {
-        Dimension fullSize = new Dimension(300, 200);
-        Scale scale        = new Scale();
-        Rotate rotate      = new Rotate();
+    void getIdentifierFallsBacktoMetaIdentifierIdentifier() {
+        instance.setIdentifier(null);
+        instance.setMetaIdentifier(new MetaIdentifier("cats"));
+        assertEquals(new Identifier("cats"), instance.getIdentifier());
+    }
+
+    @Test
+    void getOptions() {
+        assertNotNull(instance.getOptions());
+    }
+
+    @Test
+    void getOptionsWhenFrozen() {
+        instance.freeze();
+        assertThrows(UnsupportedOperationException.class,
+                () -> instance.getOptions().put("test", "test"));
+    }
+
+    @Test
+    void getOutputFormatReturnsEncodeFormatWhenPresent() {
+        Format format = Format.get("jpg");
+        instance.add(new Encode(format));
+        assertEquals(format, instance.getOutputFormat());
+    }
+
+    @Test
+    void getOutputFormatReturnsNullWhenEncodeNotPresent() {
+        assertNull(instance.getOutputFormat());
+    }
+
+    @Test
+    void getPageIndexDefaultsToZero() {
+        assertEquals(0, instance.getPageIndex());
+    }
+
+    @Test
+    void getResultingSize() {
+        Dimension fullSize   = new Dimension(300, 200);
+        ScaleByPercent scale = new ScaleByPercent();
+        Rotate rotate        = new Rotate();
         instance.add(scale);
         instance.add(rotate);
         assertEquals(fullSize, instance.getResultingSize(fullSize));
 
         instance  = new OperationList();
         Crop crop = new CropByPercent(0, 0, 0.5, 0.5);
-        scale     = new Scale(0.5);
+        scale     = new ScaleByPercent(0.5);
         instance.add(crop);
         instance.add(scale);
         assertEquals(new Dimension(75, 50), instance.getResultingSize(fullSize));
     }
 
     @Test
-    public void hasEffectWithScaleConstraint() {
-        instance = new OperationList(new Encode(Format.GIF));
+    void getScaleConstraintReturnsScaleConstraintWhenSet() {
+        instance.setMetaIdentifier(MetaIdentifier.builder()
+                .withIdentifier("cats")
+                .withScaleConstraint(1, 2)
+                .build());
+        assertEquals(new ScaleConstraint(1, 2), instance.getScaleConstraint());
+    }
+
+    @Test
+    void getScaleConstraintDefaultsToOne() {
+        assertEquals(new ScaleConstraint(1, 1), instance.getScaleConstraint());
+    }
+
+    @Test
+    void hasEffectWithScaleConstraint() {
+        instance = OperationList.builder()
+                .withOperations(new Encode(Format.get("gif")))
+                .build();
         Dimension fullSize = new Dimension(100, 100);
-        assertFalse(instance.hasEffect(fullSize, Format.GIF));
-        instance.setScaleConstraint(new ScaleConstraint(1, 2));
-        assertTrue(instance.hasEffect(fullSize, Format.GIF));
+        assertFalse(instance.hasEffect(fullSize, Format.get("gif")));
+        instance.setMetaIdentifier(MetaIdentifier.builder()
+                .withIdentifier("cats")
+                .withScaleConstraint(1, 2)
+                .build());
+        assertTrue(instance.hasEffect(fullSize, Format.get("gif")));
     }
 
     @Test
-    public void hasEffectWithSameFormat() {
-        instance = new OperationList(new Encode(Format.GIF));
-        assertFalse(instance.hasEffect(new Dimension(100, 100), Format.GIF));
+    void hasEffectWithSameFormat() {
+        instance = OperationList.builder()
+                .withOperations(new Encode(Format.get("gif")))
+                .build();
+        assertFalse(instance.hasEffect(new Dimension(100, 100), Format.get("gif")));
     }
 
     @Test
-    public void hasEffectWithDifferentFormats() {
-        instance = new OperationList(new Encode(Format.GIF));
-        assertTrue(instance.hasEffect(new Dimension(100, 100), Format.JPG));
+    void hasEffectWithDifferentFormats() {
+        instance = OperationList.builder()
+                .withOperations(new Encode(Format.get("gif")))
+                .build();
+        assertTrue(instance.hasEffect(new Dimension(100, 100), Format.get("jpg")));
     }
 
     @Test
-    public void hasEffectWithPDFSourceAndPDFOutputAndOverlay() {
-        instance = new OperationList(new Encode(Format.PDF));
-        assertFalse(instance.hasEffect(new Dimension(100, 100), Format.PDF));
+    void hasEffectWithPDFSourceAndPDFOutputAndOverlay() {
+        instance = OperationList.builder()
+                .withOperations(new Encode(Format.get("pdf")))
+                .build();
+        assertFalse(instance.hasEffect(new Dimension(100, 100), Format.get("pdf")));
     }
 
     @Test
-    public void hasEffectWithEncodeAndSameOutputFormat() {
-        instance = new OperationList(new Encode(Format.JPG));
-        assertFalse(instance.hasEffect(new Dimension(100, 100), Format.JPG));
+    void hasEffectWithEncodeAndSameOutputFormat() {
+        instance = OperationList.builder()
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
+        assertFalse(instance.hasEffect(new Dimension(100, 100), Format.get("jpg")));
     }
 
     @Test
-    public void iterator() {
+    void testHashCode() {
+        assertEquals(instance.toString().hashCode(), instance.hashCode());
+    }
+
+    @Test
+    void iterator() {
         instance.add(new CropByPixels(10, 10, 10, 10));
-        instance.add(new Scale(0.5));
+        instance.add(new ScaleByPercent(0.5));
 
         int count = 0;
         Iterator<Operation> it = instance.iterator();
@@ -630,55 +787,98 @@ public class OperationListTest extends BaseTest {
         assertEquals(2, count);
     }
 
-    @Test(expected = UnsupportedOperationException.class)
-    public void iteratorCannotRemoveWhileFrozen() {
-        instance.add(new Scale(50.5));
+    @Test
+    void iteratorCannotRemoveWhileFrozen() {
+        instance.add(new ScaleByPercent(50.5));
         instance.freeze();
         Iterator<Operation> it = instance.iterator();
         it.next();
-        it.remove();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void setIdentifierWhileFrozen() {
-        instance.freeze();
-        instance.setIdentifier(new Identifier("alpaca"));
+        assertThrows(UnsupportedOperationException.class, it::remove);
     }
 
     @Test
-    public void setScaleConstraint() {
-        instance.setScaleConstraint(new ScaleConstraint(1, 3));
-        assertEquals(1, instance.getScaleConstraint().getRational().getNumerator());
-        assertEquals(3, instance.getScaleConstraint().getRational().getDenominator());
-
-        instance.setScaleConstraint(null);
-        assertEquals(1, instance.getScaleConstraint().getRational().getNumerator());
-        assertEquals(1, instance.getScaleConstraint().getRational().getDenominator());
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void setScaleConstraintWhileFrozen() {
-        instance.freeze();
-        instance.setScaleConstraint(new ScaleConstraint(1, 2));
+    void removeWithPresentOperation() {
+        Operation op = new Rotate();
+        instance.add(op);
+        instance.remove(op);
+        assertFalse(instance.iterator().hasNext());
     }
 
     @Test
-    public void toFilename() {
-        instance = new OperationList(new Identifier("identifier.jpg"));
-        CropByPixels crop = new CropByPixels(5, 6, 20, 22);
-        instance.add(crop);
-        Scale scale = new Scale(0.4f);
-        instance.add(scale);
-        instance.add(new Rotate(15));
-        instance.add(ColorTransform.BITONAL);
-        instance.add(new Encode(Format.JPG));
-        instance.getOptions().put("animal", "cat");
-        instance.setScaleConstraint(new ScaleConstraint(1, 2));
+    void removeWithAbsentOperation() {
+        assertFalse(instance.iterator().hasNext());
+        instance.remove(new Rotate());
+        assertFalse(instance.iterator().hasNext());
+    }
 
-        String expected = "50c63748527e634134449ae20b199cc0_6c143a524f75a965058f126fa9a92f7f.jpg";
+    @Test
+    void removeWhileFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.remove(new Rotate()));
+    }
+
+    @Test
+    void setIdentifierWhileFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.setIdentifier(new Identifier("alpaca")));
+    }
+
+    @Test
+    void setMetaIdentifier() {
+        MetaIdentifier metaIdentifier = new MetaIdentifier("cats");
+        instance.setMetaIdentifier(metaIdentifier);
+        assertEquals(metaIdentifier, instance.getMetaIdentifier());
+
+        instance.setMetaIdentifier(null);
+        assertNull(instance.getMetaIdentifier());
+    }
+
+    @Test
+    void setMetaIdentifierWhileFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.setMetaIdentifier(new MetaIdentifier("cats")));
+    }
+
+    @Test
+    void setPageIndexWithIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+                () -> instance.setPageIndex(-1));
+    }
+
+    @Test
+    void setPageIndexWhileFrozen() {
+        instance.freeze();
+        assertThrows(IllegalStateException.class,
+                () -> instance.setPageIndex(3));
+    }
+
+    @Test
+    void toFilename() {
+        final Identifier identifier = new Identifier("identifier.jpg");
+        instance = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new CropByPixels(5, 6, 20, 22),
+                        new ScaleByPercent(0.4),
+                        new Rotate(15),
+                        ColorTransform.BITONAL,
+                        new Encode(Format.get("jpg")))
+                .withOptions(Map.of("animal", "cat"))
+                .withPageIndex(3)
+                .build();
+
+        String expected = "50c63748527e634134449ae20b199cc0_08592737b5ff7370bc0a70517fcb0b23.jpg";
         assertEquals(expected, instance.toFilename());
 
         // Assert that changing an operation changes the filename
+        CropByPixels crop = (CropByPixels) instance.getFirst(CropByPixels.class);
         crop.setX(12);
         assertNotEquals(expected, instance.toFilename());
 
@@ -690,148 +890,219 @@ public class OperationListTest extends BaseTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void toMap() {
-        instance = new OperationList(new Identifier("identifier.jpg"));
-        // crop
-        Crop crop = new CropByPixels(2, 4, 50, 50);
-        instance.add(crop);
-        // no-op scale
-        Scale scale = new Scale();
-        instance.add(scale);
-        // rotate
-        instance.add(new Rotate(0));
-        // transpose
-        instance.add(Transpose.HORIZONTAL);
-        // encode
-        instance.add(new Encode(Format.JPG));
-        instance.setScaleConstraint(new ScaleConstraint(1, 2));
+    void toMap() {
+        final Identifier identifier = new Identifier("identifier.jpg");
+        instance = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new CropByPixels(2, 4, 50, 50),
+                        new ScaleByPercent(),
+                        new Rotate(0),
+                        Transpose.HORIZONTAL,
+                        new Encode(Format.get("jpg")))
+                .withPageIndex(3)
+                .build();
 
         final Dimension fullSize = new Dimension(100, 100);
         Map<String,Object> map = instance.toMap(fullSize);
         assertEquals("identifier.jpg", map.get("identifier"));
+        assertEquals(3, map.get("page_index"));
         assertEquals(4, ((List<?>) map.get("operations")).size());
         assertEquals(0, ((Map<?, ?>) map.get("options")).size());
         assertEquals(1, (long) ((Map<String,Long>) map.get("scale_constraint")).get("numerator"));
         assertEquals(2, (long) ((Map<String,Long>) map.get("scale_constraint")).get("denominator"));
     }
 
-    @Test(expected = UnsupportedOperationException.class)
-    public void toMapReturnsUnmodifiableMap() {
+    @Test
+    void toMapReturnsUnmodifiableMap() {
         Dimension fullSize = new Dimension(100, 100);
         Map<String,Object> map = instance.toMap(fullSize);
-        map.put("test", "test");
+        assertThrows(UnsupportedOperationException.class,
+                () -> map.put("test", "test"));
     }
 
     @Test
-    public void testToString() {
-        instance = new OperationList(new Identifier("identifier.jpg"));
-        Crop crop = new CropByPixels(5, 6, 20, 22);
-        instance.add(crop);
-        Scale scale = new Scale(0.4);
-        instance.add(scale);
-        instance.add(new Rotate(15));
-        instance.add(ColorTransform.BITONAL);
-        instance.add(new Encode(Format.JPG));
-        instance.getOptions().put("animal", "cat");
-        instance.setScaleConstraint(new ScaleConstraint(1, 2));
-
-        String expected = "identifier.jpg_1:2_cropbypixels:5,6,20,22_scale:40%_rotate:15_colortransform:bitonal_encode:jpg_UNDEFINED_8_animal:cat";
+    void testToString() {
+        final Identifier identifier = new Identifier("identifier.jpg");
+        instance = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2).build())
+                .withOperations(
+                        new CropByPixels(5, 6, 20, 22),
+                        new ScaleByPercent(0.4),
+                        new Rotate(15),
+                        ColorTransform.BITONAL,
+                        new Encode(Format.get("jpg")))
+                .withOptions(Map.of("animal", "cat"))
+                .build();
+        String expected = "identifier.jpg_1:2_cropbypixels:5,6,20,22_scalebypercent:40%_rotate:15_colortransform:bitonal_encode:jpg_UNDEFINED_8_animal:cat";
         assertEquals(expected, instance.toString());
     }
 
     @Test
-    public void validateWithValidInstance() throws Exception {
+    void validateWithValidInstance() throws Exception {
         Dimension fullSize = new Dimension(1000, 1000);
-        OperationList ops = new OperationList(
-                new Identifier("cats"),
-                new CropByPixels(0, 0, 100, 100),
-                new Encode(Format.JPG));
-        ops.validate(fullSize, Format.PNG);
-    }
-
-    @Test(expected = ValidationException.class)
-    public void validateWithMissingIdentifier() throws Exception {
-        Dimension fullSize = new Dimension(1000, 1000);
-        OperationList ops = new OperationList(
-                new CropByPixels(0, 0, 100, 100),
-                new Encode(Format.JPG));
-        ops.validate(fullSize, Format.PNG);
-    }
-
-    @Test(expected = ValidationException.class)
-    public void validateWithMissingEncodeOperation() throws Exception {
-        Dimension fullSize = new Dimension(1000, 1000);
-        OperationList ops = new OperationList(
-                new Identifier("cats"),
-                new CropByPixels(0, 0, 100, 100));
-        ops.validate(fullSize, Format.PNG);
-    }
-
-    @Test(expected = ValidationException.class)
-    public void validateWithOutOfBoundsCrop() throws Exception {
-        Dimension fullSize = new Dimension(1000, 1000);
-        OperationList ops = new OperationList(
-                new CropByPixels(1001, 1001, 100, 100),
-                new Encode(Format.JPG));
-        ops.validate(fullSize, Format.PNG);
+        OperationList ops = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(
+                        new CropByPixels(0, 0, 100, 100),
+                        new Encode(Format.get("jpg")))
+                .build();
+        ops.validate(fullSize, Format.get("png"));
     }
 
     @Test
-    public void validateWithValidPageArgument() throws Exception {
-        OperationList ops = new OperationList(
-                new Identifier("cats"),
-                new Encode(Format.JPG));
-        ops.getOptions().put("page", "2");
-        ops.validate(new Dimension(100, 88), Format.PNG);
-    }
-
-    @Test(expected = ValidationException.class)
-    public void validateWithZeroPageArgument() throws Exception {
-        OperationList ops = new OperationList(
-                new Identifier("cats"),
-                new Encode(Format.JPG));
-        ops.getOptions().put("page", "0");
-        ops.validate(new Dimension(100, 88), Format.PNG);
-    }
-
-    @Test(expected = ValidationException.class)
-    public void validateWithNegativePageArgument() throws Exception {
-        OperationList ops = new OperationList(
-                new Identifier("cats"), new Encode(Format.JPG));
-        ops.getOptions().put("page", "-1");
-        ops.validate(new Dimension(100, 88), Format.PNG);
-    }
-
-    @Test(expected = ValidationException.class)
-    public void validateWithZeroResultingArea() throws Exception {
+    void validateWithMissingIdentifier() {
         Dimension fullSize = new Dimension(1000, 1000);
-        OperationList ops = new OperationList(
-                new Identifier("cats"),
-                new CropByPixels(0, 0, 10, 10),
-                new Scale(0.0001),
-                new Encode(Format.JPG));
-        ops.validate(fullSize, Format.PNG);
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new CropByPixels(0, 0, 100, 100),
+                        new Encode(Format.get("jpg")))
+                .build();
+        assertThrows(ValidationException.class,
+                () -> ops.validate(fullSize, Format.get("png")));
     }
 
-    @Test(expected = IllegalScaleException.class)
-    public void validateWithScaleGreaterThanMaxAllowed() throws Exception {
+    @Test
+    void validateWithMissingEncodeOperation() {
         Dimension fullSize = new Dimension(1000, 1000);
-        OperationList ops = new OperationList(
-                new Identifier("cats"),
-                new Scale(4),
-                new Encode(Format.JPG));
-        ops.setScaleConstraint(new ScaleConstraint(1, 8));
-        ops.validate(fullSize, Format.PNG);
+        OperationList ops = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new CropByPixels(0, 0, 100, 100))
+                .build();
+        assertThrows(ValidationException.class,
+                () -> ops.validate(fullSize, Format.get("png")));
     }
 
-    @Test(expected = IllegalSizeException.class)
-    public void validateWithAreaGreaterThanMaxAllowed() throws Exception {
+    @Test
+    void validateWithOutOfBoundsCrop() {
+        Dimension fullSize = new Dimension(1000, 1000);
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new CropByPixels(1001, 1001, 100, 100),
+                        new Encode(Format.get("jpg")))
+                .build();
+        assertThrows(ValidationException.class,
+                () -> ops.validate(fullSize, Format.get("png")));
+    }
+
+    @Test
+    void validateWithZeroResultingArea() {
+        Dimension fullSize = new Dimension(1000, 1000);
+        OperationList ops = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(
+                        new CropByPixels(0, 0, 10, 10),
+                        new ScaleByPercent(0.0001),
+                        new Encode(Format.get("jpg")))
+                .build();
+        assertThrows(ValidationException.class,
+                () -> ops.validate(fullSize, Format.get("png")));
+    }
+
+    @Test
+    void validateWithScaleGreaterThanMaxAllowed() {
+        Dimension fullSize = new Dimension(1000, 1000);
+        Identifier identifier = new Identifier("cats");
+        OperationList ops = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 8)
+                        .build())
+                .withOperations(
+                        new ScaleByPercent(4),
+                        new Encode(Format.get("jpg")))
+                .build();
+        assertThrows(IllegalScaleException.class,
+                () -> ops.validate(fullSize, Format.get("png")));
+    }
+
+    @Test
+    void validateWithAllowedSmallerScale() throws Exception {
+        Dimension fullSize = new Dimension(2000, 1000);
+        Identifier identifier = new Identifier("cats");
+        OperationList ops = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new ScaleByPixels(100, 50, ScaleByPixels.Mode.NON_ASPECT_FILL),
+                        new Encode(Format.get("png")))
+                .build();
+        ops.validate(fullSize, Format.get("png"));
+    }
+
+    @Test
+    void validateWithMaxAllowedScale() throws Exception {
+        Dimension fullSize = new Dimension(2000, 1000);
+        Identifier identifier = new Identifier("cats");
+        OperationList ops = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new ScaleByPixels(1000, 500, ScaleByPixels.Mode.NON_ASPECT_FILL),
+                        new Encode(Format.get("png")))
+                .build();
+        ops.validate(fullSize, Format.get("png"));
+    }
+
+    @Test
+    void validateWithScaleGreaterThanMaxAllowedBy1Pixel() throws Exception {
+        Dimension fullSize = new Dimension(639, 343);
+        Identifier identifier = new Identifier("cats");
+        OperationList ops = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new ScaleByPixels(320, 172, ScaleByPixels.Mode.NON_ASPECT_FILL),
+                        new Encode(Format.get("png")))
+                .build();
+        ops.validate(fullSize, Format.get("png"));
+    }
+
+    @Test
+    void validateWithScaleGreaterThanMaxAllowedBy2Pixels() {
+        Dimension fullSize = new Dimension(639, 343);
+        Identifier identifier = new Identifier("cats");
+        OperationList ops = OperationList.builder()
+                .withIdentifier(identifier)
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier(identifier)
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new ScaleByPixels(321, 173, ScaleByPixels.Mode.NON_ASPECT_FILL),
+                        new Encode(Format.get("jpg")))
+                .build();
+        assertThrows(IllegalScaleException.class,
+                () -> ops.validate(fullSize, Format.get("png")));
+    }
+
+    @Test
+    void validateWithAreaGreaterThanMaxAllowed() {
         Configuration.getInstance().setProperty(Key.MAX_PIXELS, 100);
         Dimension fullSize = new Dimension(1000, 1000);
-        OperationList ops = new OperationList(
-                new Identifier("cats"),
-                new Encode(Format.JPG));
-        ops.validate(fullSize, Format.PNG);
+        OperationList ops = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
+        assertThrows(IllegalSizeException.class,
+                () -> ops.validate(fullSize, Format.get("png")));
     }
 
 }

@@ -1,25 +1,27 @@
 package edu.illinois.library.cantaloupe.resource.api;
 
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.Callable;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class TaskMonitorTest extends BaseTest {
 
     private TaskMonitor instance;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    public void setUp() throws Exception {
+        super.setUp();
         instance = TaskMonitor.getInstance();
     }
 
-    @After
-    public void tearDown() {
+    @AfterEach
+    public void tearDown() throws Exception {
+        super.setUp();
         instance = null;
         TaskMonitor.clearInstance();
     }
@@ -27,8 +29,8 @@ public class TaskMonitorTest extends BaseTest {
     /* add() */
 
     @Test
-    public void testAdd() {
-        Callable<?> callable = new PurgeDelegateMethodInvocationCacheCommand();
+    void testAdd() {
+        Callable<?> callable = new PurgeInfoCacheCommand<>();
         APITask<?> message = new APITask<>(callable);
         assertNull(instance.get(message.getUUID()));
         instance.add(message);
@@ -38,8 +40,8 @@ public class TaskMonitorTest extends BaseTest {
     /* get() */
 
     @Test
-    public void testGet() {
-        Callable<?> callable = new PurgeDelegateMethodInvocationCacheCommand();
+    void testGet() {
+        Callable<?> callable = new PurgeInfoCacheCommand<>();
         APITask<?> message = new APITask<>(callable);
         instance.add(message);
         assertNotNull(instance.get(message.getUUID()));
@@ -48,8 +50,8 @@ public class TaskMonitorTest extends BaseTest {
     /* getAll() */
 
     @Test
-    public void testGetAll() {
-        Callable<?> callable = new PurgeDelegateMethodInvocationCacheCommand();
+    void testGetAll() {
+        Callable<?> callable = new PurgeInfoCacheCommand<>();
         APITask<?> message = new APITask<>(callable);
         instance.add(message);
         assertEquals(1, instance.getAll().size());

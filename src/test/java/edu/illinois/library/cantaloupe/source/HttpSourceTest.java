@@ -6,16 +6,14 @@ import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.http.Headers;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.resource.RequestContext;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.DelegateProxyService;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.test.TestUtil;
 import edu.illinois.library.cantaloupe.test.WebServer;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.handler.DefaultHandler;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -28,9 +26,10 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 abstract class HttpSourceTest extends AbstractSourceTest {
 
@@ -46,20 +45,14 @@ abstract class HttpSourceTest extends AbstractSourceTest {
      * {@link Key#HTTPSOURCE_URL_PREFIX} to the web server URI using the
      * appropriate scheme.
      */
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-
-        Configuration config = Configuration.getInstance();
-        config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-        config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                TestUtil.getFixture("delegates.rb"));
-
         instance = newInstance();
     }
 
     @Override
-    @After
+    @AfterEach
     public void tearDown() throws Exception {
         super.tearDown();
         destroyEndpoint();
@@ -95,28 +88,21 @@ abstract class HttpSourceTest extends AbstractSourceTest {
 
     @Override
     void useScriptLookupStrategy() {
-        try {
-            Configuration config = Configuration.getInstance();
-            config.setProperty(Key.HTTPSOURCE_LOOKUP_STRATEGY,
-                    "ScriptLookupStrategy");
-            config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-            config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                    TestUtil.getFixture("delegates.rb").toString());
-        } catch (IOException e) {
-            fail(e.getMessage());
-        }
+        Configuration config = Configuration.getInstance();
+        config.setProperty(Key.HTTPSOURCE_LOOKUP_STRATEGY,
+                "ScriptLookupStrategy");
     }
 
     /* checkAccess() */
 
     @Test
-    public void testCheckAccessUsingBasicLookupStrategyWithPresentUnreadableImage()
+    void testCheckAccessUsingBasicLookupStrategyWithPresentUnreadableImage()
             throws Exception {
         doTestCheckAccessWithPresentUnreadableImage(new Identifier("gif"));
     }
 
     @Test
-    public void testCheckAccessUsingScriptLookupStrategyWithPresentReadableImage()
+    void testCheckAccessUsingScriptLookupStrategyWithPresentReadableImage()
             throws Exception {
         useScriptLookupStrategy();
         Identifier identifier = new Identifier(getServerURI() + "/" +
@@ -125,7 +111,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testCheckAccessUsingScriptLookupStrategyWithMissingImage()
+    void testCheckAccessUsingScriptLookupStrategyWithMissingImage()
             throws Exception {
         useScriptLookupStrategy();
         Identifier identifier = new Identifier(getServerURI() + "/bogus");
@@ -133,7 +119,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testCheckAccessUsingScriptLookupStrategyWithPresentUnreadableImage()
+    void testCheckAccessUsingScriptLookupStrategyWithPresentUnreadableImage()
             throws Exception {
         useScriptLookupStrategy();
         Identifier identifier = new Identifier(getServerURI() + "/gif");
@@ -144,10 +130,8 @@ abstract class HttpSourceTest extends AbstractSourceTest {
             throws Exception {
         server.start();
 
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
@@ -156,31 +140,24 @@ abstract class HttpSourceTest extends AbstractSourceTest {
 
     private void doTestCheckAccessWithPresentUnreadableImage(Identifier identifier)
             throws Exception {
-        try {
-            server.setHandler(new DefaultHandler() {
-                @Override
-                public void handle(String target,
-                                   Request baseRequest,
-                                   HttpServletRequest request,
-                                   HttpServletResponse response) {
-                    response.setStatus(403);
-                    baseRequest.setHandled(true);
-                }
-            });
-            server.start();
+        server.setHandler(new DefaultHandler() {
+            @Override
+            public void handle(String target,
+                               Request baseRequest,
+                               HttpServletRequest request,
+                               HttpServletResponse response) {
+                response.setStatus(403);
+                baseRequest.setHandled(true);
+            }
+        });
+        server.start();
 
-            RequestContext context = new RequestContext();
-            context.setIdentifier(identifier);
-            DelegateProxyService service = DelegateProxyService.getInstance();
-            DelegateProxy proxy = service.newDelegateProxy(context);
-            instance.setDelegateProxy(proxy);
-            instance.setIdentifier(identifier);
-            instance.setIdentifier(identifier);
-            instance.checkAccess();
-            fail("Expected exception");
-        } catch (AccessDeniedException e) {
-            // pass
-        }
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
+        instance.setDelegateProxy(proxy);
+        instance.setIdentifier(identifier);
+        instance.setIdentifier(identifier);
+        assertThrows(AccessDeniedException.class, instance::checkAccess);
     }
 
     private void doTestCheckAccessWithMissingImage(Identifier identifier)
@@ -188,10 +165,8 @@ abstract class HttpSourceTest extends AbstractSourceTest {
         try {
             server.start();
 
-            RequestContext context = new RequestContext();
-            context.setIdentifier(identifier);
-            DelegateProxyService service = DelegateProxyService.getInstance();
-            DelegateProxy proxy = service.newDelegateProxy(context);
+            DelegateProxy proxy = TestUtil.newDelegateProxy();
+            proxy.getRequestContext().setIdentifier(identifier);
             instance.setDelegateProxy(proxy);
             instance.setIdentifier(identifier);
 
@@ -203,7 +178,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testCheckAccessUsingScriptLookupStrategyWithValidAuthentication()
+    void testCheckAccessUsingScriptLookupStrategyWithValidAuthentication()
             throws Exception {
         useScriptLookupStrategy();
 
@@ -212,18 +187,16 @@ abstract class HttpSourceTest extends AbstractSourceTest {
 
         Identifier identifier = new Identifier("valid-auth-" +
                 getServerURI() + "/" + PRESENT_READABLE_IDENTIFIER);
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
         instance.checkAccess();
     }
 
-    @Test(expected = AccessDeniedException.class)
-    public void testCheckAccessUsingScriptLookupStrategyWithInvalidAuthentication()
+    @Test
+    void testCheckAccessUsingScriptLookupStrategyWithInvalidAuthentication()
             throws Exception {
         useScriptLookupStrategy();
 
@@ -232,18 +205,16 @@ abstract class HttpSourceTest extends AbstractSourceTest {
 
         Identifier identifier = new Identifier("invalid-auth-" +
                 getServerURI() + "/" + PRESENT_READABLE_IDENTIFIER);
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
-        instance.checkAccess();
+        assertThrows(AccessDeniedException.class, instance::checkAccess);
     }
 
     @Test
-    public void testCheckAccessWith403Response() throws Exception {
+    void testCheckAccessWith403Response() throws Exception {
         server.setHandler(new DefaultHandler() {
             @Override
             public void handle(String target,
@@ -266,7 +237,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testCheckAccessWith500Response() throws Exception {
+    void testCheckAccessWith500Response() throws Exception {
         server.setHandler(new DefaultHandler() {
             @Override
             public void handle(String target,
@@ -289,7 +260,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testCheckAccessSendsUserAgentHeader() throws Exception {
+    void testCheckAccessSendsUserAgentHeader() throws Exception {
         server.setHandler(new DefaultHandler() {
             @Override
             public void handle(String target,
@@ -314,7 +285,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testCheckAccessSendsCustomHeaders() throws Exception {
+    void testCheckAccessSendsCustomHeaders() throws Exception {
         useScriptLookupStrategy();
 
         server.setHandler(new DefaultHandler() {
@@ -331,10 +302,8 @@ abstract class HttpSourceTest extends AbstractSourceTest {
 
         Identifier identifier = new Identifier(
                 getServerURI() + "/" + PRESENT_READABLE_IDENTIFIER);
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
@@ -342,7 +311,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testCheckAccessWithMalformedURI() throws Exception {
+    void testCheckAccessWithMalformedURI() throws Exception {
         server.start();
 
         Configuration config = Configuration.getInstance();
@@ -360,110 +329,29 @@ abstract class HttpSourceTest extends AbstractSourceTest {
         }
     }
 
-    /* getFormat() */
+    /* getFormatIterator() */
 
-    /**
-     * Tests {@link HttpSource#getFormat()} when the URI contains an extension.
-     */
     @Test
-    public void testGetFormat1() {
-        assertEquals(Format.JPG, instance.getFormat());
+    void testGetFormatIteratorHasNext() {
+        instance.setIdentifier(new Identifier("jpg.jpg"));
+
+        HttpSource.FormatIterator<Format> it = instance.getFormatIterator();
+
+        assertTrue(it.hasNext());
+        it.next(); // URI path extension
+        assertTrue(it.hasNext());
+        it.next(); // identifier extension
+        assertTrue(it.hasNext());
+        it.next(); // Content-Type is null
+        assertTrue(it.hasNext());
+        it.next(); // magic bytes
+        assertFalse(it.hasNext());
     }
 
-    /**
-     * Tests {@link HttpSource#getFormat()} when the identifier contains an
-     * extension.
-     */
     @Test
-    public void testGetFormat2() throws Exception {
-        useScriptLookupStrategy();
-
-        Identifier identifier = new Identifier("HttpSourceTest-" +
-                "extension-in-identifier-but-not-filename.jpg");
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
-        instance.setDelegateProxy(proxy);
-        instance.setIdentifier(new Identifier(getServerURI() + "/" + identifier));
-
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    /**
-     * Tests {@link HttpSource#getFormat()} when neither the URI nor identifier
-     * contain an extension, but there is a recognized Content-Type header.
-     */
-    @Test
-    public void testGetFormat3() throws Exception {
-        server.setHandler(new DefaultHandler() {
-            @Override
-            public void handle(String target,
-                               Request baseRequest,
-                               HttpServletRequest request,
-                               HttpServletResponse response) {
-                response.setHeader("Content-Type", "image/jpeg; charset=UTF-8");
-                baseRequest.setHandled(true);
-            }
-        });
-        server.start();
-
-        instance.setIdentifier(new Identifier("jpg"));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    /**
-     * Tests {@link HttpSource#getFormat()} when neither the URI nor identifier
-     * contain an extension, there is an unrecognized Content-Type header, and
-     * the server does not support ranges.
-     */
-    @Test
-    public void testGetFormat4() throws Exception {
-        server.setHandler(new DefaultHandler() {
-            @Override
-            public void handle(String target,
-                               Request baseRequest,
-                               HttpServletRequest request,
-                               HttpServletResponse response) {
-                response.setHeader("Content-Type", "application/octet-stream");
-                baseRequest.setHandled(true);
-            }
-        });
-        server.start();
-
-        instance.setIdentifier(new Identifier("jpg"));
-        assertEquals(Format.UNKNOWN, instance.getFormat());
-    }
-
-    /**
-     * Tests {@link HttpSource#getFormat()} when neither the URI nor identifier
-     * contain an extension, there is no Content-Type header, and the server
-     * does not support ranges.
-     */
-    @Test
-    public void testGetFormat5() throws Exception {
-        server.setHandler(new DefaultHandler() {
-            @Override
-            public void handle(String target,
-                               Request baseRequest,
-                               HttpServletRequest request,
-                               HttpServletResponse response) {
-                baseRequest.setHandled(true);
-            }
-        });
-        server.start();
-
-        instance.setIdentifier(new Identifier("jpg"));
-        assertEquals(Format.UNKNOWN, instance.getFormat());
-    }
-
-    /**
-     * Tests {@link HttpSource#getFormat()} when neither the URI nor identifier
-     * contain an extension, there is no Content-Type header, and the server
-     * supports ranges.
-     */
-    @Test
-    public void testGetFormat6() throws Exception {
+    void testGetFormatIteratorNext() throws Exception {
+        final String fixture = "jpg-incorrect-extension.png";
+        instance.setIdentifier(new Identifier(fixture));
         server.setHandler(new DefaultHandler() {
             @Override
             public void handle(String target,
@@ -472,34 +360,24 @@ abstract class HttpSourceTest extends AbstractSourceTest {
                                HttpServletResponse response) throws IOException {
                 response.setHeader("Accept-Ranges", "bytes");
                 try (OutputStream os = response.getOutputStream()) {
-                    Files.copy(TestUtil.getImage("jpg"), os);
+                    Files.copy(TestUtil.getImage(fixture), os);
                 }
             }
         });
         server.start();
 
-        // N.B.: Neither identifier nor URI can contain an extension.
-        instance.setIdentifier(new Identifier("jpg"));
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    /**
-     * Tests {@link HttpSource#getFormat()} when neither the URI nor identifier
-     * contain an extension, there is no Content-Type header, and the server
-     * supports ranges, but the ranged GET response returns unknown magic bytes.
-     */
-    @Test
-    public void testGetFormat7() throws Exception {
-        server.start();
-
-        instance.setIdentifier(new Identifier("txt"));
-        assertEquals(Format.UNKNOWN, instance.getFormat());
+        HttpSource.FormatIterator<Format> it = instance.getFormatIterator();
+        assertEquals(Format.get("png"), it.next());     // URI path extension
+        assertEquals(Format.get("png"), it.next());     // identifier extension
+        assertEquals(Format.UNKNOWN, it.next()); // Content-Type is null
+        assertEquals(Format.get("jpg"), it.next());     // magic bytes
+        assertThrows(NoSuchElementException.class, it::next);
     }
 
     /* getRequestInfo() */
 
     @Test
-    public void testGetRequestInfoUsingBasicLookupStrategyWithPrefix()
+    void testGetRequestInfoUsingBasicLookupStrategyWithPrefix()
             throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.HTTPSOURCE_URL_PREFIX,
@@ -509,11 +387,11 @@ abstract class HttpSourceTest extends AbstractSourceTest {
 
         instance.setIdentifier(new Identifier("id"));
         assertEquals(getScheme() + "://example.org/prefix/id",
-                instance.getRequestInfo().getURI().toString());
+                instance.getRequestInfo().getURI());
     }
 
     @Test
-    public void testGetRequestInfoUsingBasicLookupStrategyWithPrefixAndSuffix()
+    void testGetRequestInfoUsingBasicLookupStrategyWithPrefixAndSuffix()
             throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.HTTPSOURCE_URL_PREFIX,
@@ -528,7 +406,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testGetRequestInfoUsingBasicLookupStrategyWithoutPrefixOrSuffix()
+    void testGetRequestInfoUsingBasicLookupStrategyWithoutPrefixOrSuffix()
             throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.HTTPSOURCE_URL_PREFIX, "");
@@ -542,16 +420,14 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testGetRequestInfoUsingScriptLookupStrategyReturningString()
+    void testGetRequestInfoUsingScriptLookupStrategyReturningString()
             throws Exception {
         useScriptLookupStrategy();
 
         Identifier identifier = new Identifier(getScheme() + "-" +
                 PRESENT_READABLE_IDENTIFIER);
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
 
         server.start();
@@ -562,19 +438,17 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testGetRequestInfoUsingScriptLookupStrategyWithContextReturningString()
+    void testGetRequestInfoUsingScriptLookupStrategyWithContextReturningString()
             throws Exception {
         useScriptLookupStrategy();
 
         final Map<String, String> headers = new HashMap<>();
         headers.put("X-Forwarded-Proto", getScheme());
 
-        RequestContext context = new RequestContext();
-        context.setClientIP("1.2.3.4");
-        context.setRequestHeaders(headers);
-        context.setIdentifier(PRESENT_READABLE_IDENTIFIER);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(PRESENT_READABLE_IDENTIFIER);
+        proxy.getRequestContext().setClientIP("1.2.3.4");
+        proxy.getRequestContext().setRequestHeaders(headers);
         instance.setIdentifier(PRESENT_READABLE_IDENTIFIER);
         instance.setDelegateProxy(proxy);
 
@@ -585,15 +459,13 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testGetRequestInfoUsingScriptLookupStrategyReturningHash()
+    void testGetRequestInfoUsingScriptLookupStrategyReturningHash()
             throws Exception {
         useScriptLookupStrategy();
 
         Identifier identifier = new Identifier(getScheme() + "-jpg-rgb-64x56x8-plane.jpg");
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
@@ -608,27 +480,25 @@ abstract class HttpSourceTest extends AbstractSourceTest {
         assertEquals("yes", headers.getFirstValue("X-Custom"));
     }
 
-    @Test(expected = NoSuchFileException.class)
-    public void testGetRequestInfoUsingScriptLookupStrategyReturningNil()
+    @Test
+    void testGetRequestInfoUsingScriptLookupStrategyReturningNil()
             throws Exception {
         useScriptLookupStrategy();
         server.start();
 
         Identifier identifier = new Identifier("bogus");
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
-        instance.getRequestInfo();
+        assertThrows(NoSuchFileException.class, instance::getRequestInfo);
     }
 
     /* newStreamFactory() */
 
     @Test
-    public void testNewStreamFactoryUsingBasicLookupStrategyWithValidAuthentication()
+    void testNewStreamFactoryUsingBasicLookupStrategyWithValidAuthentication()
             throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.HTTPSOURCE_BASIC_AUTH_USERNAME,
@@ -644,13 +514,13 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testNewStreamFactoryUsingBasicLookupStrategyWithPresentReadableImage()
+    void testNewStreamFactoryUsingBasicLookupStrategyWithPresentReadableImage()
             throws Exception {
         doTestNewStreamFactoryWithPresentReadableImage(PRESENT_READABLE_IDENTIFIER);
     }
 
     @Test
-    public void testNewStreamFactoryUsingScriptLookupStrategyWithValidAuthentication()
+    void testNewStreamFactoryUsingScriptLookupStrategyWithValidAuthentication()
             throws Exception {
         useScriptLookupStrategy();
 
@@ -659,10 +529,8 @@ abstract class HttpSourceTest extends AbstractSourceTest {
 
         Identifier identifier = new Identifier("valid-auth-" +
                 getServerURI() + "/" + PRESENT_READABLE_IDENTIFIER);
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
@@ -670,7 +538,7 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testNewStreamFactoryUsingScriptLookupStrategyWithPresentReadableImage()
+    void testNewStreamFactoryUsingScriptLookupStrategyWithPresentReadableImage()
             throws Exception {
         useScriptLookupStrategy();
         Identifier identifier = new Identifier(getServerURI() + "/" +
@@ -682,10 +550,8 @@ abstract class HttpSourceTest extends AbstractSourceTest {
             throws Exception {
         server.start();
 
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
@@ -693,9 +559,9 @@ abstract class HttpSourceTest extends AbstractSourceTest {
     }
 
     @Test
-    public void testNoUnnecessaryRequests() throws Exception {
+    void testNoUnnecessaryRequests() throws Exception {
         final AtomicInteger numHEADRequests = new AtomicInteger(0);
-        final AtomicInteger numGETRequests = new AtomicInteger(0);
+        final AtomicInteger numGETRequests  = new AtomicInteger(0);
 
         server.setHandler(new DefaultHandler() {
             @Override
@@ -720,10 +586,11 @@ abstract class HttpSourceTest extends AbstractSourceTest {
         server.start();
 
         instance.checkAccess();
-        instance.getFormat();
+        instance.getFormatIterator().next();
 
         StreamFactory source = instance.newStreamFactory();
         try (InputStream is = source.newInputStream()) {
+            //noinspection ResultOfMethodCallIgnored
             is.read();
         }
 

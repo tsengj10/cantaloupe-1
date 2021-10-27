@@ -1,19 +1,19 @@
 package edu.illinois.library.cantaloupe.source;
 
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class HTTPRequestInfoTest extends BaseTest {
 
     private HTTPRequestInfo instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
@@ -25,13 +25,13 @@ public class HTTPRequestInfoTest extends BaseTest {
     }
 
     @Test
-    public void testGetBasicAuthTokenWithoutUserAndSecret() {
+    void testGetBasicAuthTokenWithoutUserAndSecret() {
         instance = new HTTPRequestInfo("http://example.org/cats");
         assertNull(instance.getBasicAuthToken());
     }
 
     @Test
-    public void testGetBasicAuthTokenWithUserAndSecret() {
+    void testGetBasicAuthTokenWithUserAndSecret() {
         assertEquals("dXNlcjpzZWNyZXQ=", instance.getBasicAuthToken());
     }
 

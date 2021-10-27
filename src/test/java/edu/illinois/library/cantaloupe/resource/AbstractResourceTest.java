@@ -5,23 +5,22 @@ import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.http.Headers;
 import edu.illinois.library.cantaloupe.http.Reference;
 import edu.illinois.library.cantaloupe.image.Format;
-import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class AbstractResourceTest extends BaseTest {
 
     private AbstractResource instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
@@ -38,63 +37,62 @@ public class AbstractResourceTest extends BaseTest {
     }
 
     @Test
-    public void testDoDELETE() throws Exception {
+    void testDoDELETE() throws Exception {
         instance.doDELETE();
         assertEquals(405, instance.getResponse().getStatus());
     }
 
     @Test
-    public void testDoGET() throws Exception {
+    void testDoGET() throws Exception {
         instance.doGET();
         assertEquals(405, instance.getResponse().getStatus());
     }
 
     @Test
-    public void testDoHEAD() throws Exception {
+    void testDoHEAD() throws Exception {
         instance.doHEAD();
         assertEquals(405, instance.getResponse().getStatus());
     }
 
     @Test
-    public void testDoOPTIONS() {
+    void testDoOPTIONS() {
         instance.doOPTIONS();
         assertEquals(204, instance.getResponse().getStatus());
     }
 
     @Test
-    public void testDoPOST() throws Exception {
+    void testDoPOST() throws Exception {
         instance.doPOST();
         assertEquals(405, instance.getResponse().getStatus());
     }
 
     @Test
-    public void testDoPUT() throws Exception {
+    void testDoPUT() throws Exception {
         instance.doPUT();
         assertEquals(405, instance.getResponse().getStatus());
     }
 
     @Test
-    public void testGetCommonTemplateVars() {
+    void testGetCommonTemplateVars() {
         Map<String,Object> vars = instance.getCommonTemplateVars();
         assertFalse(((String) vars.get("baseUri")).endsWith("/"));
         assertNotNull(vars.get("version"));
     }
 
     @Test
-    public void testGetPreferredMediaTypesWithAcceptHeaderSet() {
+    void testGetPreferredMediaTypesWithAcceptHeaderSet() {
         instance.getRequest().getHeaders().set("Accept",
                 "text/html;q=0.9, application/xhtml+xml, */*;q=0.2, text/plain;q=0.5");
 
         List<String> types = instance.getPreferredMediaTypes();
-        assertEquals(4, types.size());
+        assertEquals(3, types.size());
         assertEquals("application/xhtml+xml", types.get(0));
         assertEquals("text/html", types.get(1));
         assertEquals("text/plain", types.get(2));
-        assertEquals("*/*", types.get(3));
     }
 
     @Test
-    public void testGetPreferredMediaTypesWithAcceptHeaderNotSet() {
+    void testGetPreferredMediaTypesWithAcceptHeaderNotSet() {
         instance.getRequest().getHeaders().removeAll("Accept");
 
         List<String> types = instance.getPreferredMediaTypes();
@@ -106,7 +104,7 @@ public class AbstractResourceTest extends BaseTest {
      * using {@link Key#BASE_URI}.
      */
     @Test
-    public void testGetPublicReferenceUsingConfiguration() {
+    void testGetPublicReferenceUsingConfiguration() {
         final String baseURI = "http://example.net/base";
         Configuration.getInstance().setProperty(Key.BASE_URI, baseURI);
 
@@ -127,7 +125,7 @@ public class AbstractResourceTest extends BaseTest {
      * See {@link Reference#applyProxyHeaders(Headers)} for those.
      */
     @Test
-    public void testGetPublicReferenceUsingXForwardedHeaders() {
+    void testGetPublicReferenceUsingXForwardedHeaders() {
         MockHttpServletRequest servletRequest =
                 (MockHttpServletRequest) instance.getRequest().getServletRequest();
         servletRequest.setContextPath("");
@@ -147,7 +145,7 @@ public class AbstractResourceTest extends BaseTest {
      * using neither {@link Key#BASE_URI} nor {@literal X-Forwarded} headers.
      */
     @Test
-    public void testGetPublicReferenceFallsBackToHTTPRequest() {
+    void testGetPublicReferenceFallsBackToHTTPRequest() {
         String resourceURI = "http://example.net/cats/dogs";
 
         MockHttpServletRequest servletRequest =
@@ -163,7 +161,7 @@ public class AbstractResourceTest extends BaseTest {
      * using neither {@link Key#BASE_URI} nor {@literal X-Forwarded} headers.
      */
     @Test
-    public void testGetPublicReferenceFallsBackToHTTPSRequest() {
+    void testGetPublicReferenceFallsBackToHTTPSRequest() {
         String resourceURI = "https://example.net/cats/dogs";
 
         MockHttpServletRequest servletRequest =
@@ -175,7 +173,7 @@ public class AbstractResourceTest extends BaseTest {
     }
 
     @Test
-    public void testGetPublicReferenceOmitsQuery() {
+    void testGetPublicReferenceOmitsQuery() {
         String resourceURI = "https://example.net/cats/dogs?arg=value";
         String expected = "https://example.net/cats/dogs";
 
@@ -190,78 +188,112 @@ public class AbstractResourceTest extends BaseTest {
     /* getRepresentationDisposition() */
 
     @Test
-    public void testGetRepresentationDispositionWithQueryArg() {
-        final Identifier identifier = new Identifier("cats?/\\dogs");
-        final Format outputFormat = Format.JPG;
-
-        // none
+    void testGetRepresentationDispositionWithNoQueryArgument() {
+        instance.getRequest().getReference().getQuery().remove(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG);
         String disposition = instance.getRepresentationDisposition(
-                null, identifier, outputFormat);
+                "cats?/\\dogs", Format.get("jpg"));
         assertNull(disposition);
+    }
 
-        // inline
-        disposition = instance.getRepresentationDisposition(
-                "inline", identifier, outputFormat);
+    @Test
+    void testGetRepresentationDispositionWithInlineQueryArgument() {
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "inline");
+        String disposition = instance.getRepresentationDisposition(
+                "cats?/\\dogs", Format.get("jpg"));
         assertEquals("inline; filename=\"cats___dogs.jpg\"", disposition);
+    }
 
-        // attachment
-        disposition = instance.getRepresentationDisposition(
-                "attachment", identifier, outputFormat);
+    @Test
+    void testGetRepresentationDispositionWithAttachmentQueryArgument() {
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment");
+        String disposition = instance.getRepresentationDisposition(
+                "cats?/\\dogs", Format.get("jpg"));
         assertEquals("attachment; filename=\"cats___dogs.jpg\"", disposition);
+    }
 
-        // attachment; filename="dogs.jpg"
-        disposition = instance.getRepresentationDisposition(
-                "attachment; filename=\"dogs.jpg\"", identifier, outputFormat);
+    @Test
+    void testGetRepresentationDispositionWithAttachmentQueryArgumentWithASCIIFilename() {
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment; filename=\"dogs.jpg\"");
+        String disposition = instance.getRepresentationDisposition(
+                "cats?/\\dogs", Format.get("jpg"));
         assertEquals("attachment; filename=\"dogs.jpg\"", disposition);
+    }
 
-        // attachment; filename="unsafe_path../\.jpg"
-        disposition = instance.getRepresentationDisposition(
-                "attachment; filename=\"unsafe_path../\\.jpg\"", identifier, outputFormat);
-        assertEquals("attachment; filename=\"unsafe_path.jpg\"", disposition);
+    @Test
+    void testGetRepresentationDispositionWithAttachmentQueryArgumentWithUnsafeASCIIFilename() {
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment; filename=\"unsafe_path../\\.jpg\"");
+        String disposition = instance.getRepresentationDisposition(
+                "cats?/\\dogs", Format.get("jpg"));
+        assertEquals("attachment; filename=\"unsafe_path.jpg\"",
+                disposition);
 
         // attachment; filename="unsafe_injection_.....//./.jpg"
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment; filename=\"unsafe_injection_.....//./.jpg\"");
         disposition = instance.getRepresentationDisposition(
-                "attachment; filename=\"unsafe_injection_.....//./.jpg\"", identifier, outputFormat);
-        assertEquals("attachment; filename=\"unsafe_injection_.jpg\"", disposition);
+                "cats?/\\dogs", Format.get("jpg"));
+        assertEquals("attachment; filename=\"unsafe_injection_.jpg\"",
+                disposition);
     }
 
     @Test
-    public void testGetRepresentationDispositionUsingConfiguration() {
-        Configuration config = Configuration.getInstance();
-
-        final Identifier identifier = new Identifier("cats?/\\dogs");
-        final Format outputFormat = Format.JPG;
-
-        // test with config key set to "inline"
-        config.setProperty(Key.IIIF_CONTENT_DISPOSITION, "inline");
+    void testGetRepresentationDispositionWithAttachmentQueryArgumentWithUnicodeFilename() {
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment; filename*= UTF-8''dogs.jpg");
         String disposition = instance.getRepresentationDisposition(
-                null, identifier, outputFormat);
-        assertEquals("inline; filename=\"cats___dogs.jpg\"", disposition);
-
-        // test with config key set to "attachment"
-        config.setProperty(Key.IIIF_CONTENT_DISPOSITION, "attachment");
-        disposition = instance.getRepresentationDisposition(
-                null, identifier, outputFormat);
-        assertEquals("attachment; filename=\"cats___dogs.jpg\"", disposition);
+                "cats?/\\dogs", Format.get("jpg"));
+        assertEquals("attachment; filename=\"cats___dogs.jpg\"; filename*= UTF-8''dogs.jpg",
+                disposition);
     }
 
     @Test
-    public void testGetRepresentationDispositionFallsBackToNone() {
-        Configuration config = Configuration.getInstance();
-
-        final Identifier identifier = new Identifier("cats?/\\dogs");
-        final Format outputFormat = Format.JPG;
-
-        // undefined config key
-        config.clearProperty(Key.IIIF_CONTENT_DISPOSITION);
+    void testGetRepresentationDispositionWithAttachmentQueryArgumentWithUnsafeUnicodeFilename() {
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment; filename*=UTF-8''unsafe_path../\\.jpg");
         String disposition = instance.getRepresentationDisposition(
-                null, identifier, outputFormat);
-        assertNull(disposition);
+                "cats?/\\dogs", Format.get("jpg"));
+        assertEquals("attachment; filename=\"cats___dogs.jpg\"; filename*= UTF-8''unsafe_path.jpg",
+                disposition);
 
-        // empty config key
-        config.setProperty(Key.IIIF_CONTENT_DISPOSITION, "");
+        // attachment; filename*= utf-8''"unsafe_injection_.....//./.jpg"
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment; filename*= utf-8''unsafe_injection_.....//./.jpg");
         disposition = instance.getRepresentationDisposition(
-                null, identifier, outputFormat);
+                "cats?/\\dogs", Format.get("jpg"));
+        assertEquals("attachment; filename=\"cats___dogs.jpg\"; filename*= UTF-8''unsafe_injection_.jpg",
+                disposition);
+    }
+
+    @Test
+    void testGetRepresentationDispositionWithAttachmentQueryArgumentWithASCIIAndUnicodeFilenames() {
+        instance.getRequest().getReference().getQuery().set(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG,
+                "attachment; filename=\"dogs.jpg\"; filename*= UTF-8''dogs.jpg");
+        String disposition = instance.getRepresentationDisposition(
+                "cats?/\\dogs", Format.get("jpg"));
+        assertEquals("attachment; filename=\"dogs.jpg\"; filename*= UTF-8''dogs.jpg",
+                disposition);
+    }
+
+    @Test
+    void testGetRepresentationDispositionFallsBackToNone() {
+        instance.getRequest().getReference().getQuery().remove(
+                AbstractResource.RESPONSE_CONTENT_DISPOSITION_QUERY_ARG);
+        String disposition = instance.getRepresentationDisposition(
+                "cats?/\\dogs", Format.get("jpg"));
         assertNull(disposition);
     }
 

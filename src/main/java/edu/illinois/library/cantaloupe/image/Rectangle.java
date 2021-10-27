@@ -2,9 +2,10 @@ package edu.illinois.library.cantaloupe.image;
 
 import edu.illinois.library.cantaloupe.util.StringUtils;
 
+import java.util.Arrays;
+
 /**
- * <p>Rectangle on a 2D plane with origin and dimensions. Values are stored as
- * doubles, in contrast to {@link java.awt.Rectangle}.</p>
+ * <p>Rectangle on a plane with origin and dimensions. Fields are doubles.</p>
  *
  * <p>A negative origin is allowed. Zero-dimensions are allowed, but not
  * negative ones.</p>
@@ -45,20 +46,12 @@ public final class Rectangle {
      *         instance.
      */
     public boolean contains(Rectangle other) {
-        return contains(other, DELTA);
-    }
-
-    /**
-     * @return Whether the given rectangle is entirely contained within the
-     *         instance.
-     */
-    public boolean contains(Rectangle other, double delta) {
-        return (other.x() > x || x - other.x() < delta) &&
-                (other.y() > y || y - other.y() < delta) &&
+        return (other.x() > x || x - other.x() < DELTA) &&
+                (other.y() > y || y - other.y() < DELTA) &&
                 ((other.x() + other.width() <= x + width()) ||
-                        (other.x() + other.width() - x - width() < delta)) &&
+                        (other.x() + other.width() - x - width() < DELTA)) &&
                 ((other.y() + other.height() <= y + height()) ||
-                        (other.y() + other.height() - y - height() < delta));
+                        (other.y() + other.height() - y - height() < DELTA));
     }
 
     @Override
@@ -77,8 +70,7 @@ public final class Rectangle {
 
     @Override
     public int hashCode() {
-        return Long.hashCode(Double.hashCode(x()) + Double.hashCode(y()) +
-                Double.hashCode(width()) + Double.hashCode(height()));
+        return Arrays.hashCode(new double[] { x(), y(), width(), height() });
     }
 
     public double x() {
@@ -97,18 +89,30 @@ public final class Rectangle {
         return dimension.height();
     }
 
+    /**
+     * @return Rounded value of {@link #x()}.
+     */
     public int intX() {
         return (int) Math.round(x);
     }
 
+    /**
+     * @return Rounded value of {@link #y()}.
+     */
     public int intY() {
         return (int) Math.round(y);
     }
 
+    /**
+     * @return Rounded value of {@link #width()}.
+     */
     public int intWidth() {
         return dimension.intWidth();
     }
 
+    /**
+     * @return Rounded value of {@link #height()}.
+     */
     public int intHeight() {
         return dimension.intHeight();
     }
@@ -118,7 +122,6 @@ public final class Rectangle {
         final double y2      = y() + height();
         final double otherX2 = other.x() + other.width();
         final double otherY2 = other.y() + other.height();
-
         return other.x() < x2 && other.y() < y2 &&
                 otherX2 > x() && otherY2 > y();
     }
@@ -127,28 +130,14 @@ public final class Rectangle {
         return dimension.isEmpty();
     }
 
-    public void growWidth(double amount) {
-        setWidth(width() + amount);
+    public void move(double x, double y) {
+        setX(x() + x);
+        setY(y() + y);
     }
 
-    public void growHeight(double amount) {
-        setHeight(height() + amount);
-    }
-
-    public void moveLeft(double amount) {
-        setX(x() - amount);
-    }
-
-    public void moveRight(double amount) {
-        setX(x() + amount);
-    }
-
-    public void moveUp(double amount) {
-        setY(y() - amount);
-    }
-
-    public void moveDown(double amount) {
-        setY(y() + amount);
+    public void resize(double xAmount, double yAmount) {
+        setWidth(width() + xAmount);
+        setHeight(height() + yAmount);
     }
 
     /**

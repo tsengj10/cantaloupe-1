@@ -1,25 +1,29 @@
 package edu.illinois.library.cantaloupe.processor;
 
+import edu.illinois.library.cantaloupe.Application;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
+import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
-import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.image.Format;
+import edu.illinois.library.cantaloupe.operation.ScaleByPercent;
 import edu.illinois.library.cantaloupe.operation.ValidationException;
 import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFactory;
 import edu.illinois.library.cantaloupe.processor.codec.ReaderHint;
-import edu.illinois.library.cantaloupe.resource.iiif.ProcessorFeature;
+import edu.illinois.library.cantaloupe.processor.codec.ImageWriterFacade;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
 import edu.illinois.library.cantaloupe.util.Stopwatch;
 import org.apache.commons.io.IOUtils;
 import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.pdmodel.DefaultResourceCache;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
@@ -30,12 +34,14 @@ import org.slf4j.LoggerFactory;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -77,7 +83,7 @@ class PdfBoxProcessor extends AbstractProcessor
 
     @Override
     public Set<Format> getAvailableOutputFormats() {
-        return (Format.PDF.equals(getSourceFormat())) ?
+        return (Format.get("pdf").equals(getSourceFormat())) ?
                 ImageWriterFactory.supportedFormats() :
                 Collections.unmodifiableSet(Collections.emptySet());
     }
@@ -93,73 +99,39 @@ class PdfBoxProcessor extends AbstractProcessor
     }
 
     @Override
-    public Set<ProcessorFeature> getSupportedFeatures() {
-        return Java2DPostProcessor.SUPPORTED_FEATURES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality> getSupportedIIIF1Qualities() {
-        return Java2DPostProcessor.SUPPORTED_IIIF_1_QUALITIES;
-    }
-
-    @Override
-    public Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality> getSupportedIIIF2Qualities() {
-        return Java2DPostProcessor.SUPPORTED_IIIF_2_QUALITIES;
-    }
-
-    @Override
     public void process(OperationList opList,
                         Info imageInfo,
-                        OutputStream outputStream) throws ProcessorException {
+                        OutputStream outputStream) throws FormatException, ProcessorException {
         try {
             super.process(opList, imageInfo, outputStream);
 
             final ScaleConstraint scaleConstraint = opList.getScaleConstraint();
 
             final Set<ReaderHint> hints = EnumSet.noneOf(ReaderHint.class);
-            Scale scale = (Scale) opList.getFirst(Scale.class);
+            ScaleByPercent scale = (ScaleByPercent) opList.getFirst(ScaleByPercent.class);
             if (scale == null) {
-                scale = new Scale();
+                scale = new ScaleByPercent();
             }
 
-            Double pct = scale.getPercent();
-            ReductionFactor reductionFactor = new ReductionFactor();
-            if (pct != null) {
-                reductionFactor = ReductionFactor.forScale(pct);
-            }
+            double pct = scale.getPercent();
+            ReductionFactor reductionFactor = ReductionFactor.forScale(pct);
 
-            // This processor supports a "page" URI query argument.
-            int page = getPageNumber(opList.getOptions());
+            int pageIndex = opList.getPageIndex();
 
             BufferedImage image = readImage(
-                    page - 1, reductionFactor, scaleConstraint);
-            Java2DPostProcessor.postProcess(
-                    image, hints, opList, imageInfo, reductionFactor,
-                    metadata, outputStream);
+                    pageIndex, reductionFactor, scaleConstraint);
+            image = Java2DPostProcessor.postProcess(
+                    image, hints, opList, imageInfo, reductionFactor);
+            ImageWriterFacade.write(image,
+                    (Encode) opList.getFirst(Encode.class),
+                    outputStream);
+        } catch (SourceFormatException e) {
+            throw e;
         } catch (IOException | IndexOutOfBoundsException e) {
             throw new ProcessorException(e.getMessage(), e);
         } finally {
             close();
         }
-    }
-
-    /**
-     * @param options Operation list options map.
-     * @return Page number from the given options map, or {@literal 1} if not
-     *         found.
-     */
-    private int getPageNumber(Map<String,Object> options) {
-        int page = 1;
-        String pageStr = (String) options.get("page");
-        if (pageStr != null) {
-            try {
-                page = Integer.parseInt(pageStr);
-            } catch (NumberFormatException e) {
-                LOGGER.info("Page number from URI query string is not " +
-                        "an integer; using page 1.");
-            }
-        }
-        return Math.max(page, 1);
     }
 
     @Override
@@ -172,10 +144,13 @@ class PdfBoxProcessor extends AbstractProcessor
             final Stopwatch watch = new Stopwatch();
 
             if (sourceFile != null) {
-                doc = PDDocument.load(sourceFile.toFile());
+                doc = PDDocument.load(sourceFile.toFile(),
+                        getMemoryUsageSetting());
             } else {
                 try (InputStream is = streamFactory.newInputStream()) {
-                    doc = PDDocument.load(is);
+                    doc = PDDocument.load(is, getMemoryUsageSetting());
+                } catch (IOException e) {
+                    throw new SourceFormatException();
                 }
             }
 
@@ -189,18 +164,44 @@ class PdfBoxProcessor extends AbstractProcessor
                 }
             });
 
-            // Read the document's XMP metadata.
-            final PDMetadata pdfMetadata = doc.getDocumentCatalog().getMetadata();
-            if (pdfMetadata != null) {
-                try (InputStream is = pdfMetadata.exportXMPMetadata()) {
-                    ByteArrayOutputStream os = new ByteArrayOutputStream();
-                    IOUtils.copy(is, os);
-                    metadata = new Metadata();
-                    metadata.setXMP(os.toByteArray());
+            metadata = new Metadata();
+            { // Read the document's native metadata.
+                PDDocumentInformation info = doc.getDocumentInformation();
+                Map<String, String> pdfMetadata = new HashMap<>();
+                for (String key : info.getMetadataKeys()) {
+                    if (info.getPropertyStringValue(key) != null) {
+                        pdfMetadata.put(key, info.getPropertyStringValue(key).toString());
+                    }
+                }
+                metadata.setNativeMetadata(pdfMetadata);
+            }
+            { // Read the document's XMP metadata.
+                PDMetadata pdfMetadata = doc.getDocumentCatalog().getMetadata();
+                if (pdfMetadata != null) {
+                    try (InputStream is = pdfMetadata.exportXMPMetadata()) {
+                        ByteArrayOutputStream os = new ByteArrayOutputStream();
+                        is.transferTo(os);
+
+                        metadata.setXMP(os.toByteArray());
+                    }
                 }
             }
 
             LOGGER.debug("Loaded document in {}", watch);
+        }
+    }
+
+    private MemoryUsageSetting getMemoryUsageSetting() {
+        final Configuration config = Configuration.getInstance();
+        if (config.getBoolean(Key.PROCESSOR_PDF_SCRATCH_FILE_ENABLED, false)) {
+            final long maxMainMemoryBytes =
+                    config.getLongBytes(Key.PROCESSOR_PDF_MAX_MEMORY_BYTES, -1);
+            final String scratchFileLocation = Application.getTempPath().toString();
+            File filePath = new File(scratchFileLocation);
+            return MemoryUsageSetting.setupMixed(maxMainMemoryBytes, -1)
+                    .setTempDir(filePath);
+        } else {
+            return MemoryUsageSetting.setupMainMemoryOnly(-1);
         }
     }
 
@@ -238,6 +239,7 @@ class PdfBoxProcessor extends AbstractProcessor
         final float scale = dpi / 72f;
         final Info info = Info.builder()
                 .withFormat(getSourceFormat())
+                .withMetadata(metadata)
                 .withNumResolutions(1)
                 .build();
         info.getImages().clear();
@@ -245,22 +247,22 @@ class PdfBoxProcessor extends AbstractProcessor
         for (int i = 0; i < doc.getNumberOfPages(); i++) {
             // PDF doesn't have native dimensions, so figure out the dimensions
             // at the current DPI setting.
-            final PDPage page = doc.getPage(i);
+            final PDPage page         = doc.getPage(i);
             final PDRectangle cropBox = page.getCropBox();
-            final float widthPt = cropBox.getWidth();
-            final float heightPt = cropBox.getHeight();
-            final int rotationAngle = page.getRotation();
+            final float widthPt       = cropBox.getWidth();
+            final float heightPt      = cropBox.getHeight();
+            final int rotationAngle   = page.getRotation();
 
-            int widthPx = Math.round(widthPt * scale);
+            int widthPx  = Math.round(widthPt * scale);
             int heightPx = Math.round(heightPt * scale);
             if (rotationAngle == 90 || rotationAngle == 270) {
-                int tmp = widthPx;
+                int tmp  = widthPx;
                 //noinspection SuspiciousNameCombination
-                widthPx = heightPx;
+                widthPx  = heightPx;
                 heightPx = tmp;
             }
 
-            Dimension size = new Dimension(widthPx, heightPx);
+            Dimension size   = new Dimension(widthPx, heightPx);
             Info.Image image = new Info.Image();
             image.setSize(size);
             image.setTileSize(size);
@@ -282,19 +284,21 @@ class PdfBoxProcessor extends AbstractProcessor
     }
 
     @Override
+    public boolean supportsSourceFormat(Format format) {
+        return Format.get("pdf").equals(format);
+    }
+
+    @Override
     public void validate(OperationList opList, Dimension fullSize)
-            throws ValidationException, ProcessorException {
+            throws ValidationException, ProcessorException, OutputFormatException {
         StreamProcessor.super.validate(opList, fullSize);
 
-        // The "page" argument, if present, was validated in the overridden
-        // method, but we also want to make sure the page is actually contained
-        // in the PDF.
-        final String pageStr = (String) opList.getOptions().get("page");
-        if (pageStr != null) {
-            final int page = Integer.parseInt(pageStr);
+        // Ensure that the page is contained in the PDF.
+        final int pageIndex = opList.getPageIndex();
+        if (pageIndex != 0) {
             try {
                 readDocument();
-                if (page > doc.getNumberOfPages()) {
+                if (pageIndex >= doc.getNumberOfPages()) {
                     close();
                     throw new ValidationException(
                             "Page number is out-of-bounds.");

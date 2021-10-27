@@ -6,8 +6,9 @@ import edu.illinois.library.cantaloupe.http.Response;
 
 import java.net.ConnectException;
 import java.net.URI;
+import java.util.Arrays;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public final class HTTPAssert {
 
@@ -49,7 +50,7 @@ public final class HTTPAssert {
             Response response = client.send();
             assertTrue(response.getBodyAsString().contains(contains));
         } catch (ResourceException e) {
-            assertTrue(e.getResponse().getContentAsString().contains(contains));
+            assertTrue(e.getResponse().getBodyAsString().contains(contains));
         } catch (Exception e) {
             fail(e.getMessage());
         } finally {
@@ -59,6 +60,25 @@ public final class HTTPAssert {
 
     public static void assertRepresentationContains(String contains, URI uri) {
         assertRepresentationContains(contains, uri.toString());
+    }
+
+    public static void assertRepresentationsNotSame(URI uri1, URI uri2) {
+        Client client = newClient();
+        try {
+            client.setURI(uri1);
+            Response response = client.send();
+            byte[] body1 = response.getBody();
+
+            client.setURI(uri2);
+            response = client.send();
+            byte[] body2 = response.getBody();
+
+            assertFalse(Arrays.equals(body1, body2));
+        } catch (Exception e) {
+            fail(e.getMessage());
+        } finally {
+            stopQuietly(client);
+        }
     }
 
     public static void assertStatus(int expectedCode, String uri) {

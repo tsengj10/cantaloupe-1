@@ -12,17 +12,19 @@ import edu.illinois.library.cantaloupe.http.Reference;
 import edu.illinois.library.cantaloupe.http.Status;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.image.ScaleConstraint;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.DelegateProxyService;
-import edu.illinois.library.cantaloupe.script.DisabledException;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
+import edu.illinois.library.cantaloupe.image.MetaIdentifierTransformer;
+import edu.illinois.library.cantaloupe.image.MetaIdentifierTransformerFactory;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxyService;
+import edu.illinois.library.cantaloupe.delegate.UnavailableException;
 import edu.illinois.library.cantaloupe.util.StringUtils;
 import org.slf4j.Logger;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -39,28 +41,14 @@ import java.util.stream.Collectors;
  * more of the HTTP-method-specific methods {@link #doGET()} etc., and may
  * optionally use {@link #doInit()} and {@link #destroy()}.</p>
  *
- * <p>This class is loosely modeled on Restlet framework's {@literal
- * ServerResource}, both because this application used to use Restlet, and
- * because it's a good design.</p>
- *
- * <p>Unlike {@link javax.servlet.http.HttpServlet}s, instances will only be
- * used once and will not be shared across threads.</p>
+ * <p>Unlike {@link javax.servlet.http.HttpServlet}s, instances are only used
+ * once and not shared across threads.</p>
  */
 public abstract class AbstractResource {
 
-    /**
-     * Replaces {@link #PUBLIC_IDENTIFIER_HEADER_DEPRECATED}.
-     */
     public static final String PUBLIC_IDENTIFIER_HEADER = "X-Forwarded-ID";
 
-    /**
-     * @deprecated Since version 4.0. Still respected, but superseded by
-     *             {@link #PUBLIC_IDENTIFIER_HEADER}.
-     */
-    @Deprecated
-    public static final String PUBLIC_IDENTIFIER_HEADER_DEPRECATED = "X-IIIF-ID";
-
-    protected static final String RESPONSE_CONTENT_DISPOSITION_QUERY_ARG =
+    static final String RESPONSE_CONTENT_DISPOSITION_QUERY_ARG =
             "response-content-disposition";
 
     /**
@@ -68,9 +56,8 @@ public abstract class AbstractResource {
      */
     private DelegateProxy delegateProxy;
 
+    private List<String> pathArguments          = Collections.emptyList();
     private final RequestContext requestContext = new RequestContext();
-
-    private List<String> pathArguments = Collections.emptyList();
     private Request request;
     private HttpServletResponse response;
 
@@ -79,9 +66,79 @@ public abstract class AbstractResource {
      */
     private Identifier identifier;
 
-    private static String safeContentDispositionFilename(Identifier identifier,
+    /**
+     * Cached by {@link #getMetaIdentifier()}.
+     */
+    private MetaIdentifier metaIdentifier;
+
+    /**
+     * <p>Returns a sanitized value for a {@code Content-Disposition} header
+     * based on the value of the {@link #RESPONSE_CONTENT_DISPOSITION_QUERY_ARG}
+     * query argument.</p>
+     *
+     * <p>If the disposition is {@code attachment} and the filename is not
+     * set, it is set to a reasonable value based on the given identifier and
+     * output format.</p>
+     *
+     * @param queryArg      Value of the unsanitized {@link
+     *                      #RESPONSE_CONTENT_DISPOSITION_QUERY_ARG} query
+     *                      argument.
+     * @param identifierStr Identifier or meta-identifier.
+     * @param outputFormat  Output format.
+     * @return              Value for a {@code Content-Disposition} header,
+     *                      which may be {@code null}.
+     */
+    private static String getSafeContentDisposition(String queryArg,
+                                                    String identifierStr,
+                                                    Format outputFormat) {
+        String disposition = null;
+        if (queryArg != null) {
+            queryArg = URLDecoder.decode(queryArg, StandardCharsets.UTF_8);
+            if (queryArg.startsWith("inline")) {
+                disposition = "inline; filename=\"" +
+                        safeContentDispositionFilename(identifierStr, outputFormat) + "\"";
+            } else if (queryArg.startsWith("attachment")) {
+                final List<String> dispositionParts = new ArrayList<>(3);
+                dispositionParts.add("attachment");
+
+                // Check for ISO-8859-1 filename pattern
+                Pattern pattern = Pattern.compile(".*filename=\"?([^\"]*)\"?.*");
+                Matcher matcher = pattern.matcher(queryArg);
+                String filename;
+                if (matcher.matches()) {
+                    // Filter out filename-unsafe characters as well as "..".
+                    filename = StringUtils.sanitize(
+                            matcher.group(1),
+                            Pattern.compile("\\.\\."),
+                            Pattern.compile(StringUtils.ASCII_FILENAME_UNSAFE_REGEX));
+                } else {
+                    filename = safeContentDispositionFilename(identifierStr,
+                            outputFormat);
+                }
+                dispositionParts.add("filename=\"" + filename + "\"");
+
+                // Check for Unicode filename pattern
+                pattern = Pattern.compile(".*filename\\*= ?(utf-8|UTF-8)''([^\"]*).*");
+                matcher = pattern.matcher(queryArg);
+                if (matcher.matches()) {
+                    // Filter out filename-unsafe characters as well as "..".
+                    filename = StringUtils.sanitize(
+                            matcher.group(2),
+                            Pattern.compile("\\.\\."),
+                            Pattern.compile(StringUtils.UNICODE_FILENAME_UNSAFE_REGEX,
+                                    Pattern.UNICODE_CHARACTER_CLASS));
+                    filename = Reference.encode(filename);
+                    dispositionParts.add("filename*= UTF-8''" + filename);
+                }
+                disposition = String.join("; ", dispositionParts);
+            }
+        }
+        return disposition;
+    }
+
+    private static String safeContentDispositionFilename(String identifierStr,
                                                          Format outputFormat) {
-        return identifier.toString().replaceAll(StringUtils.ASCII_FILENAME_REGEX, "_") +
+        return identifierStr.replaceAll(StringUtils.ASCII_FILENAME_UNSAFE_REGEX, "_") +
                 "." + outputFormat.getPreferredExtension();
     }
 
@@ -90,45 +147,25 @@ public abstract class AbstractResource {
      * called but before any request-handler method (like {@link #doGET()}
      * etc.)</p>
      *
-     * <p>Overrides must call {@literal super}.</p>
+     * <p>Overrides must call {@code super}.</p>
      */
     public void doInit() throws Exception {
         response.setHeader("X-Powered-By",
                 Application.getName() + "/" + Application.getVersion());
-
-        if (DelegateProxyService.isEnabled()) {
-            requestContext.setRequestURI(request.getReference().toURI());
-            requestContext.setRequestHeaders(request.getHeaders().toMap());
-            requestContext.setClientIP(getCanonicalClientIPAddress());
-            requestContext.setCookies(request.getCookies());
-            requestContext.setIdentifier(getIdentifier());
-
-            ScaleConstraint scaleConstraint =
-                    ScaleConstraint.fromIdentifierPathComponent(getIdentifierPathComponent());
-            if (scaleConstraint == null) {
-                // Delegate script users will appreciate not having to check
-                // for null.
-                scaleConstraint = new ScaleConstraint(1, 1);
-            }
-            requestContext.setScaleConstraint(scaleConstraint);
-        }
-
         // Log request info.
         getLogger().info("Handling {} {}",
-                request.getMethod(),
-                request.getReference().getPath());
+                request.getMethod(), request.getReference().getPath());
         getLogger().debug("Request headers: {}",
-                request.getHeaders()
-                .stream()
-                .map(h -> h.getName() + ": " +
-                        ("Authorization".equals(h.getName()) ? "******" : h.getValue()))
-                .collect(Collectors.joining("; ")));
+                request.getHeaders().stream()
+                        .map(h -> h.getName() + ": " +
+                                ("Authorization".equals(h.getName()) ? "******" : h.getValue()))
+                        .collect(Collectors.joining("; ")));
     }
 
     /**
      * <p>Called at the end of the instance's lifecycle.</p>
      *
-     * <p>Overrides must call {@literal super}.</p>
+     * <p>Overrides must call {@code super}.</p>
      */
     public void destroy() {
     }
@@ -137,7 +174,7 @@ public abstract class AbstractResource {
      * <p>Must be overridden by implementations that support {@literal
      * DELETE}.</p>
      *
-     * <p>Overrides must not call {@literal super}.</p>
+     * <p>Overrides must not call {@code super}.</p>
      */
     public void doDELETE() throws Exception {
         response.setStatus(Status.METHOD_NOT_ALLOWED.getCode());
@@ -146,7 +183,7 @@ public abstract class AbstractResource {
     /**
      * <p>Must be overridden by implementations that support {@literal GET}.</p>
      *
-     * <p>Overrides must not call {@literal super}.</p>
+     * <p>Overrides must not call {@code super}.</p>
      */
     public void doGET() throws Exception {
         response.setStatus(Status.METHOD_NOT_ALLOWED.getCode());
@@ -177,7 +214,7 @@ public abstract class AbstractResource {
      * <p>Must be overridden by implementations that support {@literal
      * POST}.</p>
      *
-     * <p>Overrides must not call {@literal super}.</p>
+     * <p>Overrides must not call {@code super}.</p>
      */
     public void doPOST() throws Exception {
         response.setStatus(Status.METHOD_NOT_ALLOWED.getCode());
@@ -186,15 +223,15 @@ public abstract class AbstractResource {
     /**
      * <p>Must be overridden by implementations that support {@literal PUT}.</p>
      *
-     * <p>Overrides must not call {@literal super}.</p>
+     * <p>Overrides must not call {@code super}.</p>
      */
     public void doPUT() throws Exception {
         response.setStatus(Status.METHOD_NOT_ALLOWED.getCode());
     }
 
     /**
-     * Checks the {@literal Authorization} header for credentials that exist in
-     * the given {@link CredentialStore}. If not found, sends a {@literal
+     * Checks the {@code Authorization} header for credentials that exist in
+     * the given {@link CredentialStore}. If not found, sends a {@code
      * WWW-Authenticate} header and throws an exception.
      *
      * @param realm           Basic realm.
@@ -208,7 +245,8 @@ public abstract class AbstractResource {
         String header = getRequest().getHeaders().getFirstValue("Authorization", "");
         if ("Basic ".equals(header.substring(0, Math.min(header.length(), 6)))) {
             String encoded = header.substring(6);
-            String decoded = new String(Base64.getDecoder().decode(encoded.getBytes()));
+            String decoded = new String(Base64.getDecoder().decode(encoded.getBytes(StandardCharsets.UTF_8)),
+                    StandardCharsets.UTF_8);
             String[] parts = decoded.split(":");
             if (parts.length == 2) {
                 String user = parts[0];
@@ -218,7 +256,6 @@ public abstract class AbstractResource {
                 }
             }
         }
-
         if (!isAuthenticated) {
             getResponse().setHeader("WWW-Authenticate",
                     "Basic realm=\"" + realm + "\" charset=\"UTF-8\"");
@@ -231,10 +268,9 @@ public abstract class AbstractResource {
      * request. The response is modified if necessary.</p>
      *
      * <p>The authorization system (rooted in the {@link
-     * edu.illinois.library.cantaloupe.script.DelegateMethod#AUTHORIZE
+     * edu.illinois.library.cantaloupe.delegate.DelegateMethod#AUTHORIZE
      * authorization delegate method} supports simple boolean authorization
-     * which maps to the HTTP 200 and 403 statuses. In the event of a 403,
-     * IIIF image information should not be included in the response body.</p>
+     * which maps to the HTTP 200 and 403 statuses.</p>
      *
      * <p>Authorization can simultaneously be used in the context of the
      * <a href="https://iiif.io/api/auth/1.0/">IIIF Authentication API, where
@@ -257,84 +293,114 @@ public abstract class AbstractResource {
         final Authorizer authorizer =
                 new AuthorizerFactory().newAuthorizer(getDelegateProxy());
         final AuthInfo info = authorizer.authorize();
-
         if (info != null) {
-            final int code = info.getResponseStatus();
-            final String location = info.getRedirectURI();
-            final ScaleConstraint scaleConstraint = info.getScaleConstraint();
-
-            if (location != null) {
-                getResponse().setStatus(code);
-                getResponse().setHeader("Cache-Control", "no-cache");
-                getResponse().setHeader("Location", location);
-                new StringRepresentation("Redirect: " + location)
-                        .write(getResponse().getOutputStream());
-                return false;
-            } else if (scaleConstraint != null) {
-                Reference publicRef = getPublicReference(scaleConstraint);
-                getResponse().setStatus(code);
-                getResponse().setHeader("Cache-Control", "no-cache");
-                getResponse().setHeader("Location", publicRef.toString());
-                new StringRepresentation("Redirect: " + publicRef)
-                        .write(getResponse().getOutputStream());
-                return false;
-            } else if (code >= 400) {
-                getResponse().setStatus(code);
-                getResponse().setHeader("Cache-Control", "no-cache");
-                if (code == 401) {
-                    getResponse().setHeader("WWW-Authenticate",
-                            info.getChallengeValue());
-                }
-                throw new ResourceException(new Status(code));
-            }
+            return processAuthInfo(info);
         }
         return true;
     }
 
     /**
-     * @return User agent's IP address, respecting the {@literal
-     *         X-Forwarded-For} request header, if present.
+     * <p>Uses an {@link Authorizer} to determine how to respond to the
+     * request. The response is modified if necessary.</p>
+     *
+     * <p>The authorization system (rooted in the {@link
+     * edu.illinois.library.cantaloupe.delegate.DelegateMethod#AUTHORIZE
+     * authorization delegate method} supports simple boolean authorization
+     * which maps to the HTTP 200 and 403 statuses. In the event of a 403,
+     * IIIF image information should not be included in the response body.</p>
+     *
+     * <p>Authorization can simultaneously be used in the context of the
+     * <a href="https://iiif.io/api/auth/1.0/">IIIF Authentication API, where
+     * it works a little differently. Here, HTTP 401 is returned instead of
+     * 403, and the response body <strong>does</strong> include image
+     * information. (See
+     * <a href="https://iiif.io/api/auth/1.0/#interaction-with-access-controlled-resources">
+     * Interaction with Access-Controlled Resources</a>. This means that IIIF
+     * information endpoints should swallow any {@link ResourceException}s with
+     * HTTP 401 status.</p>
+     *
+     * @return Whether authorization was successful. {@code false} indicates a
+     *         redirect, and client code should abort.
+     * @throws IOException if there was an I/O error while checking
+     *         authorization.
+     * @throws ResourceException if authorization resulted in an HTTP 400-level
+     *         response.
      */
-    private String getCanonicalClientIPAddress() {
-        // The value is expected to be in the format: "client, proxy1, proxy2"
-        final String forwardedFor =
-                request.getHeaders().getFirstValue("X-Forwarded-For", "");
-        if (!forwardedFor.isEmpty()) {
-            return forwardedFor.split(",")[0].trim();
-        } else {
-            // Fall back to the client IP address.
-            return request.getRemoteAddr();
+    protected final boolean preAuthorize() throws IOException, ResourceException {
+        final Authorizer authorizer =
+                new AuthorizerFactory().newAuthorizer(getDelegateProxy());
+        final AuthInfo info = authorizer.preAuthorize();
+        if (info != null) {
+            return processAuthInfo(info);
         }
+        return true;
+    }
+
+    private boolean processAuthInfo(AuthInfo info)
+            throws IOException, ResourceException {
+        final int code                      = info.getResponseStatus();
+        final String location               = info.getRedirectURI();
+        final MetaIdentifier metaIdentifier = new MetaIdentifier(getMetaIdentifier());
+        metaIdentifier.setScaleConstraint(info.getScaleConstraint());
+
+        if (location != null) {
+            getResponse().setStatus(code);
+            getResponse().setHeader("Cache-Control", "no-cache");
+            getResponse().setHeader("Location", location);
+            new StringRepresentation("Redirect: " + location)
+                    .write(getResponse().getOutputStream());
+            return false;
+        } else if (metaIdentifier.getScaleConstraint() != null) {
+            Reference publicRef = getPublicReference(metaIdentifier);
+            getResponse().setStatus(code);
+            getResponse().setHeader("Cache-Control", "no-cache");
+            getResponse().setHeader("Location", publicRef.toString());
+            new StringRepresentation("Redirect: " + publicRef)
+                    .write(getResponse().getOutputStream());
+            return false;
+        } else if (code >= 400) {
+            getResponse().setStatus(code);
+            getResponse().setHeader("Cache-Control", "no-cache");
+            if (code == 401) {
+                getResponse().setHeader("WWW-Authenticate",
+                        info.getChallengeValue());
+            }
+            throw new ResourceException(new Status(code));
+        }
+        return true;
     }
 
     /**
-     * @return Map of template variables common to most or all templates, such
-     *         as variables that appear in a common header.
+     * @return Template variables common to most or all templates, such as
+     *         variables that appear in a common header.
      */
     protected final Map<String, Object> getCommonTemplateVars() {
         final Map<String,Object> vars = new HashMap<>();
         vars.put("version", Application.getVersion());
-
-        String baseURI = getPublicRootReference().toString();
-        // Normalize the base URI. Note that the <base> tag will need it to
-        // have a trailing slash.
-        if (baseURI.endsWith("/")) {
-            baseURI = baseURI.substring(0, baseURI.length() - 2);
+        try {
+            String baseURI = getPublicRootReference().toString();
+            // Normalize the base URI. Note that the <base> tag will need it to
+            // have a trailing slash.
+            if (baseURI.endsWith("/")) {
+                baseURI = baseURI.substring(0, baseURI.length() - 2);
+            }
+            vars.put("baseUri", baseURI);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalClientArgumentException(e);
         }
-        vars.put("baseUri", baseURI);
         return vars;
     }
 
     /**
      * @return Instance for the current request. The result is cached. May be
-     *         {@literal null}.
+     *         {@code null}.
      */
     protected final DelegateProxy getDelegateProxy() {
-        if (delegateProxy == null && DelegateProxyService.isEnabled()) {
+        if (delegateProxy == null && DelegateProxyService.isDelegateAvailable()) {
             DelegateProxyService service = DelegateProxyService.getInstance();
             try {
                 delegateProxy = service.newDelegateProxy(getRequestContext());
-            } catch (DisabledException e) {
+            } catch (UnavailableException e) {
                 getLogger().debug("newDelegateProxy(): {}", e.getMessage());
             }
         }
@@ -342,12 +408,18 @@ public abstract class AbstractResource {
     }
 
     /**
-     * Returns the decoded identifier path component of the URI. (This may not
-     * be the identifier that the client supplies or sees; for that, use {@link
-     * #getPublicIdentifier()}.)
+     * <p>Returns the decoded identifier path component of the URI. (This may
+     * not be the identifier that the client supplies or sees; for that, use
+     * {@link #getPublicIdentifier()}.)</p>
      *
-     * @return Identifier, or {@literal null} if the URI does not have an
+     * <p>N.B.: Depending on the image request endpoint API, The return value
+     * may include "meta-information" that is not part of the identifier but is
+     * encoded along with it. In that case, it is not safe to consume via this
+     * method, and {@link #getMetaIdentifier()} should be used instead.</p>
+     *
+     * @return Identifier, or {@code null} if the URI does not have an
      *         identifier path component.
+     * @see #getMetaIdentifier()
      * @see #getPublicIdentifier()
      */
     protected Identifier getIdentifier() {
@@ -365,11 +437,11 @@ public abstract class AbstractResource {
      * resources have an identifier as the first path argument, so this will
      * work for them, but if not, an override will be necessary.)</p>
      *
-     * <p>The result is not decoded and may include a {@link
-     * edu.illinois.library.cantaloupe.image.ScaleConstraint scale constraint
-     * suffix}. As such, it is not usable without additional processing.</p>
+     * <p>The result is not decoded and may be a {@link MetaIdentifier
+     * meta-identifier}. As such, it is not usable without additional
+     * processing.</p>
      *
-     * @return Identifier, or {@literal null} if no path arguments are
+     * @return Identifier, or {@code null} if no path arguments are
      *         available.
      */
     protected String getIdentifierPathComponent() {
@@ -378,6 +450,30 @@ public abstract class AbstractResource {
     }
 
     abstract protected Logger getLogger();
+
+    /**
+     * Returns the decoded identifier path component of the URI, which may
+     * include page number or other information. (This may not be the path
+     * component that the client supplies or sees; for that, use {@link
+     * #getPublicIdentifier()}.)
+     *
+     * @return Instance corresponding to the first {@link #getPathArguments()
+     *         path argument}, or {@code null} if no path arguments are
+     *         available.
+     * @see #getIdentifier()
+     * @see #getPublicIdentifier()
+     */
+    protected MetaIdentifier getMetaIdentifier() {
+        if (metaIdentifier == null) {
+            String pathComponent = getIdentifierPathComponent();
+            if (pathComponent != null) {
+                metaIdentifier = MetaIdentifier.fromURIPathComponent(
+                        pathComponent, getDelegateProxy());
+                metaIdentifier.freeze();
+            }
+        }
+        return metaIdentifier;
+    }
 
     /**
      * Returns the segments of the URI path that are considered arguments.
@@ -391,7 +487,7 @@ public abstract class AbstractResource {
 
     /**
      * @return List of client-preferred media types as expressed in the
-     *         {@literal Accept} request header.
+     *         {@code Accept} request header.
      * @see    <a href="https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html">
      *         RFC 2616</a>
      */
@@ -416,13 +512,16 @@ public abstract class AbstractResource {
         if (acceptHeader != null) {
             String[] clauses = acceptHeader.split(",");
             for (String clause : clauses) {
-                String[] parts = clause.split(";");
+                String[] parts        = clause.split(";");
                 Preference preference = new Preference();
-                preference.mediaType = parts[0].trim();
+                preference.mediaType  = parts[0].trim();
+                if ("*/*".equals(preference.mediaType)) {
+                    continue;
+                }
                 if (parts.length > 1) {
                     String q = parts[1].trim();
                     if (q.startsWith("q=")) {
-                        q = q.substring(2, q.length());
+                        q = q.substring(2);
                         preference.qValue = Float.parseFloat(q);
                     }
                 } else {
@@ -434,14 +533,13 @@ public abstract class AbstractResource {
         return preferences.stream()
                 .sorted()
                 .map(p -> p.mediaType)
-                .collect(Collectors.toList());
+                .collect(Collectors.toUnmodifiableList());
     }
 
     /**
      * <p>Returns the identifier that the client sees. This will be the value
-     * of either the {@link #PUBLIC_IDENTIFIER_HEADER} or {@link
-     * #PUBLIC_IDENTIFIER_HEADER_DEPRECATED} headers, if available, or else
-     * the {@literal identifier} URI path component.</p>
+     * of the {@link #PUBLIC_IDENTIFIER_HEADER} header, if available, or else
+     * the {@code identifier} URI path component.</p>
      *
      * <p>The result is not decoded, as the encoding may be influenced by
      * {@link Key#SLASH_SUBSTITUTE}, for example.</p>
@@ -449,22 +547,15 @@ public abstract class AbstractResource {
      * @see #getIdentifier()
      */
     protected String getPublicIdentifier() {
-        String urlID = getIdentifierPathComponent();
-        // Try to use the value of the identifier header, if supplied.
-        String header   = PUBLIC_IDENTIFIER_HEADER;
-        String headerID = request.getHeaders().getFirstValue(header, "");
-        if (headerID.isEmpty()) {
-            // Fall back to the deprecated one.
-            header   = PUBLIC_IDENTIFIER_HEADER_DEPRECATED;
-            headerID = request.getHeaders().getFirstValue(header, "");
-        }
-        return headerID.isEmpty() ? urlID : headerID;
+        return request.getHeaders().getFirstValue(
+                PUBLIC_IDENTIFIER_HEADER,
+                getIdentifierPathComponent());
     }
 
     /**
      * <p>Returns the current public reference.</p>
      *
-     * <p>{@link Key#BASE_URI} is respected, if set. Otherwise, the {@literal
+     * <p>{@link Key#BASE_URI} is respected, if set. Otherwise, the {@code
      * X-Forwarded-*} request headers are respected, if available. Finally,
      * Servlet-supplied information is used otherwise.</p>
      *
@@ -492,53 +583,28 @@ public abstract class AbstractResource {
 
     /**
      * Variant of {@link #getPublicReference()} that replaces the identifier
-     * path component's scale constraint suffix, if an identifier path
-     * component is available.
+     * path component's meta-identifier if an identifier path component is
+     * available.
      *
-     * @param newConstraint Scale constraint to suffix to the identifier.
-     *                      Supply {@literal 1,1} to remove the suffix.
+     * @param newMetaIdentifier Meta-identifier.
      */
-    protected Reference getPublicReference(ScaleConstraint newConstraint) {
-        newConstraint = newConstraint.getReduced();
-
-        final Reference publicRef = new Reference(getPublicReference());
+    protected Reference getPublicReference(MetaIdentifier newMetaIdentifier) {
+        final Reference publicRef         = new Reference(getPublicReference());
         final List<String> pathComponents = publicRef.getPathComponents();
-        final int identifierIndex =
-                pathComponents.indexOf(getIdentifierPathComponent());
-        String identifierComponent = pathComponents.get(identifierIndex);
+        final int identifierIndex         = pathComponents.indexOf(
+                getIdentifierPathComponent());
 
-        // If the identifier already contains a scale constraint suffix...
-        Matcher matcher = ScaleConstraint.IDENTIFIER_SUFFIX_PATTERN
-                .matcher(identifierComponent);
-        if (matcher.find()) {
-            ScaleConstraint currentConstraint =
-                    ScaleConstraint.fromIdentifierPathComponent(identifierComponent);
-            // And it's either not equal to the one we want, or evaluates to 1,
-            // remove it.
-            if (!currentConstraint.equals(newConstraint) ||
-                    (currentConstraint.getRational().getNumerator() ==
-                            currentConstraint.getRational().getDenominator())) {
-                identifierComponent = identifierComponent.substring(0,
-                        identifierComponent.length() -
-                                currentConstraint.toIdentifierSuffix().length());
-            }
-        }
-
-        // Append the new suffix if necessary.
-        String newIdentifier = identifierComponent;
-        if (newConstraint.getRational().getNumerator() !=
-                newConstraint.getRational().getDenominator()) {
-            newIdentifier += newConstraint.toIdentifierSuffix();
-        }
-
-        publicRef.setPathComponent(identifierIndex, newIdentifier);
+        final MetaIdentifierTransformer xformer =
+                new MetaIdentifierTransformerFactory().newInstance(getDelegateProxy());
+        final String newMetaIdentifierString = xformer.serialize(newMetaIdentifier);
+        publicRef.setPathComponent(identifierIndex, newMetaIdentifierString);
         return publicRef;
     }
 
     /**
      * <p>Returns a reference to the base URI path of the application.</p>
      *
-     * <p>{@link Key#BASE_URI} is respected, if set. Otherwise, the {@literal
+     * <p>{@link Key#BASE_URI} is respected, if set. Otherwise, the {@code
      * X-Forwarded-*} request headers are respected, if available. Finally,
      * Servlet-supplied information is used otherwise.</p>
      *
@@ -558,13 +624,11 @@ public abstract class AbstractResource {
             ref.setHost(baseRef.getHost());
             ref.setPort(baseRef.getPort());
             ref.setPath(StringUtils.stripEnd(baseRef.getPath(), "/"));
-
             getLogger().debug("Base URI from assembled from {} key: {}",
                     Key.BASE_URI, ref);
         } else {
             // Try to use X-Forwarded-* headers.
             ref.applyProxyHeaders(getRequest().getHeaders());
-
             getLogger().debug("Base URI assembled from X-Forwarded headers: {}",
                     ref);
         }
@@ -572,75 +636,22 @@ public abstract class AbstractResource {
     }
 
     /**
-     * <p>Returns a value for a {@literal Content-Disposition} header based on
-     * the following in order of preference:</p>
+     * <p>Returns a sanitized value for a {@code Content-Disposition} header
+     * based on the value of the {@link #RESPONSE_CONTENT_DISPOSITION_QUERY_ARG}
+     * query argument.</p>
      *
-     * <ol>
-     *     <li>The value of the {@link #RESPONSE_CONTENT_DISPOSITION_QUERY_ARG}
-     *     query argument</li>
-     *     <li>The setting of {@link Key#IIIF_CONTENT_DISPOSITION} in the
-     *     application configuration</li>
-     * </ol>
-     *
-     * <p>Falls back to an empty disposition, signified by a {@literal null}
-     * return value.</p>
-     *
-     * <p>If the disposition is {@literal attachment} and the filename is not
+     * <p>If the disposition is {@code attachment} and the filename is not
      * set, it will be set to a reasonable value based on the given identifier
      * and output format.</p>
      *
-     * @param queryArg Value of the {@link
-     *                 #RESPONSE_CONTENT_DISPOSITION_QUERY_ARG} query argument.
-     * @param identifier
-     * @param outputFormat
+     * @return Value for a {@code Content-Disposition} header, which may be
+     *         {@code null}.
      */
-    protected String getRepresentationDisposition(String queryArg,
-                                                  Identifier identifier,
+    protected String getRepresentationDisposition(String identifierStr,
                                                   Format outputFormat) {
-        String disposition = null;
-        // If a query argument value is available, use that. Otherwise, consult
-        // the configuration.
-        if (queryArg != null) {
-            try {
-                queryArg = URLDecoder.decode(queryArg, "UTF-8");
-            } catch (UnsupportedEncodingException e) {
-                throw new RuntimeException(e);
-            }
-            if (queryArg.startsWith("inline")) {
-                disposition = "inline; filename=\"" +
-                        safeContentDispositionFilename(identifier, outputFormat) + "\"";
-            } else if (queryArg.startsWith("attachment")) {
-                Pattern pattern = Pattern.compile(".*filename=\"?([^\"]*)\"?.*");
-                Matcher m = pattern.matcher(queryArg);
-                String filename;
-                if (m.matches()) {
-                    // Filter out filename-unsafe characters as well as "..".
-                    // Some browsers don't allow spaces in Content-Disposition
-                    // filenames, so use underscore instead.
-                    filename = StringUtils.sanitize(
-                            m.group(1),
-                            Pattern.compile("\\.\\."),
-                            Pattern.compile(StringUtils.ASCII_FILENAME_REGEX));
-                } else {
-                    filename = safeContentDispositionFilename(identifier,
-                            outputFormat);
-                }
-                disposition = "attachment; filename=\"" + filename + "\"";
-            }
-        } else {
-            switch (Configuration.getInstance()
-                    .getString(Key.IIIF_CONTENT_DISPOSITION, "none")) {
-                case "inline":
-                    disposition = "inline; filename=\"" +
-                            safeContentDispositionFilename(identifier, outputFormat) + "\"";
-                    break;
-                case "attachment":
-                    disposition = "attachment; filename=\"" +
-                            safeContentDispositionFilename(identifier, outputFormat) + "\"";
-                    break;
-            }
-        }
-        return disposition;
+        var queryArg = getRequest().getReference().getQuery()
+                .getFirstValue(RESPONSE_CONTENT_DISPOSITION_QUERY_ARG);
+        return getSafeContentDisposition(queryArg, identifierStr, outputFormat);
     }
 
     /**
@@ -665,14 +676,6 @@ public abstract class AbstractResource {
     }
 
     /**
-     * @return Scale constraint from the {@link #getIdentifierPathComponent()
-     *         identifier path component}, or {@literal null} if not present.
-     */
-    protected final ScaleConstraint getScaleConstraint() {
-        return ScaleConstraint.fromIdentifierPathComponent(getIdentifierPathComponent());
-    }
-
-    /**
      * <p>This implementation returns a one-element array containing {@link
      * Method#OPTIONS}. It can be overridden to declare or not declare support
      * for:</p>
@@ -692,10 +695,11 @@ public abstract class AbstractResource {
     }
 
     /**
-     * @param limitToTypes Media types to limit the result to, in order of
-     *                     most to least preferred by the application.
-     * @return Best media type conforming to client preferences as expressed in
-     *         the {@literal Accept} header.
+     * @param limitToTypes Media types to limit the result to, in order of most
+     *                     to least preferred by the application.
+     * @return             Best media type conforming to client preferences as
+     *                     expressed in the {@code Accept} header; or {@code
+     *                     null} if negotiation failed.
      */
     protected final String negotiateContentType(List<String> limitToTypes) {
         return getPreferredMediaTypes().stream()

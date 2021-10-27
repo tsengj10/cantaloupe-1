@@ -1,8 +1,10 @@
 package edu.illinois.library.cantaloupe.processor;
 
 import edu.illinois.library.cantaloupe.image.Dimension;
+import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
-import edu.illinois.library.cantaloupe.image.ScaleConstraint;
+import edu.illinois.library.cantaloupe.image.MetaIdentifier;
+import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.operation.ColorTransform;
 import edu.illinois.library.cantaloupe.operation.Crop;
 import edu.illinois.library.cantaloupe.image.Format;
@@ -12,14 +14,16 @@ import edu.illinois.library.cantaloupe.operation.CropToSquare;
 import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.Rotate;
-import edu.illinois.library.cantaloupe.operation.Scale;
+import edu.illinois.library.cantaloupe.operation.ScaleByPercent;
+import edu.illinois.library.cantaloupe.operation.ScaleByPixels;
 import edu.illinois.library.cantaloupe.operation.Transpose;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg.TurboJPEGImageWriter;
 import edu.illinois.library.cantaloupe.source.PathStreamFactory;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -27,20 +31,24 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Arrays;
-import java.util.EnumSet;
-import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static edu.illinois.library.cantaloupe.test.Assert.ImageAssert.*;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.*;
 
 /**
  * <p>Contains tests common to all {@link Processor}s.</p>
@@ -50,7 +58,7 @@ import static org.junit.Assert.*;
  * fixture image whose format it supports, with every output {@link Format}.</p>
  *
  * <p>Fixtures are obtained from {@link TestUtil#getImage(String)}. Fixture
- * names must start with the lowercased {@link Format#name()} and contain
+ * names must start with the lowercased {@link Format#getName()} and contain
  * {@literal WxHxS} (width, height, sample size) somewhere after that.</p>
  */
 abstract class AbstractProcessorTest extends BaseTest {
@@ -60,7 +68,7 @@ abstract class AbstractProcessorTest extends BaseTest {
     protected abstract Processor newInstance();
 
     private Processor newInstance(Path fixture, Format sourceFormat)
-            throws UnsupportedSourceFormatException {
+            throws SourceFormatException {
         Processor proc = newInstance();
         proc.setSourceFormat(sourceFormat);
 
@@ -79,63 +87,19 @@ abstract class AbstractProcessorTest extends BaseTest {
     }
 
     private Set<Format> getSupportedSourceFormats(Processor processor) {
-        Set<Format> formats = EnumSet.noneOf(Format.class);
-        for (Format format : Format.values()) {
-            try {
-                processor.setSourceFormat(format);
-                formats.add(format);
-            } catch (UnsupportedSourceFormatException e) {
-                // continue
-            }
-        }
-        return formats;
-    }
-
-    /* getSupportedIIIF11Qualities() */
-
-    /**
-     * Tests for the presence of all available IIIF 1.x qualities. Subclasses
-     * must override if they lack support for any of these.
-     */
-    @Test
-    public void testGetSupportedIIIF1Qualities() throws Exception {
-        Processor proc = newInstance();
-        proc.setSourceFormat(getAnySupportedSourceFormat(proc));
-
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v1.Quality> expectedQualities =
-                EnumSet.of(
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.BITONAL,
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.COLOR,
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.GREY,
-                        edu.illinois.library.cantaloupe.resource.iiif.v1.Quality.NATIVE);
-        assertEquals(expectedQualities, proc.getSupportedIIIF1Qualities());
-    }
-
-    /* getSupportedIIIF20Qualities() */
-
-    /**
-     * Tests for the presence of all available IIIF 2.x qualities. Subclasses
-     * must override if they lack support for any of these.
-     */
-    @Test
-    public void testGetSupportedIIIF2Qualities() throws Exception {
-        Processor proc = newInstance();
-        proc.setSourceFormat(getAnySupportedSourceFormat(proc));
-
-        Set<edu.illinois.library.cantaloupe.resource.iiif.v2.Quality> expectedQualities =
-                EnumSet.of(
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.BITONAL,
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.COLOR,
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.GRAY,
-                        edu.illinois.library.cantaloupe.resource.iiif.v2.Quality.DEFAULT);
-        assertEquals(expectedQualities, proc.getSupportedIIIF2Qualities());
+        return Format.all().
+                stream().
+                filter(processor::supportsSourceFormat).
+                collect(Collectors.toSet());
     }
 
     /* process() */
 
     @Test
     public void testProcessWithNoOperations() throws Exception {
-        OperationList ops = new OperationList(new Encode(Format.JPG)); // OK, one operation, but it's required
+        OperationList ops = OperationList.builder()
+                .withOperations(new Encode(Format.get("jpg"))) // OK, one operation, but it's required
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -152,10 +116,12 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithOnlyNoOpOperations() throws Exception {
-        Scale scale = new Scale();
-        Rotate rotate = new Rotate(0);
-        OperationList ops = new OperationList(
-                scale, rotate, new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPercent(),
+                        new Rotate(0),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -171,11 +137,59 @@ abstract class AbstractProcessorTest extends BaseTest {
     }
 
     @Test
+    public void testProcessWithNonzeroOrientation() throws Exception {
+        OperationList ops = OperationList.builder()
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier("cats")
+                        .build())
+                .withOperations(
+                        new ScaleByPercent(),
+                        new Encode(Format.get("jpg")))
+                .build();
+
+        Path fixture;
+        Format sourceFormat;
+        Dimension size;
+        try (Processor processor = newInstance()) {
+            if (processor.supportsSourceFormat(Format.get("jpg"))) {
+                sourceFormat = Format.get("jpg");
+                fixture = TestUtil.getImage("jpg-exif-orientation-270.jpg");
+                size = new Dimension(64, 56);
+            } else if (processor.supportsSourceFormat(Format.get("jp2"))) {
+                sourceFormat = Format.get("jp2");
+                fixture = TestUtil.getImage("jp2-orientation-90.jp2");
+                size = new Dimension(64, 56);
+            } else {
+                return;
+            }
+        }
+
+        doProcessTest(fixture, sourceFormat, ops, new ProcessorAssertion() {
+            {
+                this.sourceSize = size;
+            }
+            @Override
+            public void run() {
+                assertEquals(this.sourceSize.width(),
+                        this.resultingImage.getHeight(), DELTA);
+                assertEquals(this.sourceSize.height(),
+                        this.resultingImage.getWidth(), DELTA);
+
+            }
+        });
+    }
+
+    @Test
     public void testProcessWithScaleConstraint() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(),
-                new Encode(Format.JPG));
-        ops.setScaleConstraint(new ScaleConstraint(1, 2));
+        OperationList ops = OperationList.builder()
+                .withMetaIdentifier(MetaIdentifier.builder()
+                        .withIdentifier("cats")
+                        .withScaleConstraint(1, 2)
+                        .build())
+                .withOperations(
+                        new ScaleByPercent(),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -193,14 +207,17 @@ abstract class AbstractProcessorTest extends BaseTest {
     @Test
     public void testProcessWithSquareCropOperation() throws Exception {
         CropToSquare crop = new CropToSquare();
-        OperationList ops = new OperationList(crop, new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(crop, new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
             public void run() {
                 if (this.sourceSize != null) {
-                    double expectedSize = (this.sourceSize.width() > this.sourceSize.height()) ?
-                            this.sourceSize.height() : this.sourceSize.width();
+                    double expectedSize = Math.min(
+                            this.sourceSize.width(),
+                            this.sourceSize.height());
                     assertEquals(expectedSize,
                             this.resultingImage.getWidth(), DELTA);
                     assertEquals(expectedSize,
@@ -212,11 +229,33 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithCropByPixelsOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new CropByPixels(10, 10, 35, 30),
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new CropByPixels(10, 10, 35, 30),
+                        new Encode(Format.get("jpg")))
+                .build();
+
+        boolean tmpFlag = false;
+        try (Processor proc = newInstance()) {
+            if (proc instanceof AbstractImageIOProcessor) {
+                tmpFlag = true;
+            }
+        }
+        final boolean flag = tmpFlag;
 
         forEachFixture(ops, new ProcessorAssertion() {
+            {
+                if (flag) {
+                    // Rotated images won't work due to the way the Crop operation
+                    // is set up.
+                    this.skippedFixtures.addAll(List.of(
+                            "gif-xmp-orientation-90.gif",
+                            "jpg-exif-orientation-270.jpg",
+                            "jpg-xmp-orientation-90.jpg",
+                            "png-rotated.png",
+                            "tif-rotated.tif"));
+                }
+            }
             @Override
             public void run() {
                 assertEquals(35, this.resultingImage.getWidth());
@@ -230,7 +269,9 @@ abstract class AbstractProcessorTest extends BaseTest {
         final double width = 0.2;
         final double height = 0.2;
         Crop crop = new CropByPercent(0.2, 0.2, width, height);
-        OperationList ops = new OperationList(crop, new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(crop, new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -246,15 +287,13 @@ abstract class AbstractProcessorTest extends BaseTest {
         });
     }
 
-    @Ignore // TODO: write this
-    @Test
-    public void testProcessWithNormalizeOperation() throws Exception {
-    }
-
     @Test
     public void testProcessWithNullScaleOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(), new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPercent(),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -271,9 +310,11 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithScaleAspectFitWidthOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(20, null, Scale.Mode.ASPECT_FIT_WIDTH),
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPixels(20, null, ScaleByPixels.Mode.ASPECT_FIT_WIDTH),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -290,9 +331,11 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithScaleAspectFitHeightOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(null, 20, Scale.Mode.ASPECT_FIT_HEIGHT),
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPixels(null, 20, ScaleByPixels.Mode.ASPECT_FIT_HEIGHT),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -309,9 +352,11 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithDownscaleByPercentageOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(0.5),
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPercent(0.5),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -328,9 +373,11 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithUpscaleByPercentageOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(1.5),
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPercent(1.5),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -347,9 +394,11 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithAspectFitInsideScaleOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(20, 20, Scale.Mode.ASPECT_FIT_INSIDE),
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPixels(20, 20, ScaleByPixels.Mode.ASPECT_FIT_INSIDE),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -370,9 +419,11 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithNonAspectFillScaleOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Scale(20, 20, Scale.Mode.NON_ASPECT_FILL),
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        new ScaleByPixels(20, 20, ScaleByPixels.Mode.NON_ASPECT_FILL),
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -385,9 +436,11 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithTransposeOperation() throws Exception {
-        OperationList ops = new OperationList(
-                Transpose.HORIZONTAL,
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        Transpose.HORIZONTAL,
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -404,8 +457,9 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithRotate0DegreesOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Rotate(0), new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(new Rotate(0), new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -422,8 +476,9 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithRotate275DegreesOperation() throws Exception {
-        OperationList ops = new OperationList(
-                new Rotate(275), new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(new Rotate(275), new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             @Override
@@ -449,21 +504,24 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithBitonalFilterOperation() throws Exception {
-        OperationList ops = new OperationList(
-                ColorTransform.BITONAL,
-                new Encode(Format.PNG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        ColorTransform.BITONAL,
+                        new Encode(Format.get("png")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             {
                 if (newInstance() instanceof JaiProcessor) {
-                    // These may be JAI bugs
-                    this.skippedFixtures.add("bmp-rgba-64x56x8.bmp");
-                    this.skippedFixtures.add("gif");
-                    this.skippedFixtures.add("gif-animated-looping.gif");
-                    this.skippedFixtures.add("gif-animated-non-looping.gif");
-                    this.skippedFixtures.add("gif-rgb-64x56x8.gif");
-                    this.skippedFixtures.add("gif-rotated.gif");
-                    this.skippedFixtures.add("gif-xmp.gif");
+                    // These may be JAI bugs, don't know and don't care
+                    this.skippedFixtures.addAll(List.of(
+                            "bmp-rgba-64x56x8.bmp",
+                            "gif",
+                            "gif-animated-looping.gif",
+                            "gif-animated-non-looping.gif",
+                            "gif-rgb-64x56x8.gif",
+                            "gif-xmp.gif",
+                            "gif-xmp-orientation-90.gif"));
                 }
             }
             @Override
@@ -475,21 +533,25 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithGrayscaleFilterOperation() throws Exception {
-        OperationList ops = new OperationList(
-                ColorTransform.GRAY,
-                new Encode(Format.JPG));
+        OperationList ops = OperationList.builder()
+                .withOperations(
+                        ColorTransform.GRAY,
+                        new Encode(Format.get("jpg")))
+                .build();
 
         forEachFixture(ops, new ProcessorAssertion() {
             {
                 if (newInstance() instanceof JaiProcessor) {
-                    // These may be JAI bugs
-                    this.skippedFixtures.add("bmp-rgba-64x56x8.bmp");
-                    this.skippedFixtures.add("gif");
-                    this.skippedFixtures.add("gif-animated-looping.gif");
-                    this.skippedFixtures.add("gif-animated-non-looping.gif");
-                    this.skippedFixtures.add("gif-rgb-64x56x8.gif");
-                    this.skippedFixtures.add("gif-rotated.gif");
-                    this.skippedFixtures.add("gif-xmp.gif");
+                    // These may be JAI bugs, don't know and don't care
+                    this.skippedFixtures.addAll(List.of(
+                            "bmp-rgba-64x56x8.bmp",
+                            "gif",
+                            "gif-animated-looping.gif",
+                            "gif-animated-non-looping.gif",
+                            "gif-rgb-64x56x8.gif",
+                            "gif-xmp.gif",
+                            "gif-xmp-orientation-90.gif",
+                            "xpm"));
                 }
             }
             @Override
@@ -501,18 +563,25 @@ abstract class AbstractProcessorTest extends BaseTest {
 
     @Test
     public void testProcessWithAllSupportedOutputFormats() throws Exception {
-        Processor proc = newInstance();
-        proc.setSourceFormat(getAnySupportedSourceFormat(proc));
-        Set<Format> outputFormats = proc.getAvailableOutputFormats();
+        boolean tmpFlag = false;
+        Set<Format> outputFormats;
+        try (Processor proc = newInstance()) {
+            proc.setSourceFormat(getAnySupportedSourceFormat(proc));
+            outputFormats = proc.getAvailableOutputFormats();
+            if (proc instanceof Java2dProcessor || proc instanceof JaiProcessor) {
+                tmpFlag = true;
+            }
+        }
+        final boolean flag = tmpFlag;
 
         for (Format outputFormat : outputFormats) {
-            OperationList ops = new OperationList(new Encode(outputFormat));
+            OperationList ops = OperationList.builder()
+                    .withOperations(new Encode(outputFormat))
+                    .build();
 
             forEachFixture(ops, new ProcessorAssertion() {
                 {
-                    // TODO: why is this necessary?
-                    Processor proc = newInstance();
-                    if (proc instanceof Java2dProcessor || proc instanceof JaiProcessor) {
+                    if (flag) {
                         this.skippedFixtures.add("bmp-rgba-64x56x8.bmp");
                     }
                 }
@@ -527,6 +596,119 @@ abstract class AbstractProcessorTest extends BaseTest {
         }
     }
 
+    @Test
+    public void testProcessWithActualFormatDifferentFromSetFormat() throws Exception {
+        try (Processor proc = newInstance()) {
+            proc.setSourceFormat(getAnySupportedSourceFormat(proc));
+            Path fixture = TestUtil.getImage("unknown");
+            if (proc instanceof StreamProcessor) {
+                StreamProcessor sproc = (StreamProcessor) proc;
+                StreamFactory streamFactory = new PathStreamFactory(fixture);
+                sproc.setStreamFactory(streamFactory);
+            } else if (proc instanceof FileProcessor) {
+                FileProcessor fproc = (FileProcessor) proc;
+                fproc.setSourceFile(fixture);
+            }
+
+            OperationList opList = OperationList.builder()
+                    .withOperations(new Encode(proc.getAvailableOutputFormats().iterator().next()))
+                    .build();
+
+            // Can't use Processor.readInfo() because that would throw an
+            // UnsupportedSourceFormatException too.
+            Info info = Info.builder().withSize(100, 100).build();
+
+            assertThrows(SourceFormatException.class, () ->
+                proc.process(opList, info, OutputStream.nullOutputStream()));
+        }
+    }
+
+    @Test
+    public void testProcessWithTurboJPEGAvailable() throws Exception {
+        // We don't want a failure if TurboJPEG is not actually available.
+        assumeTrue(TurboJPEGImageWriter.isTurboJPEGAvailable());
+
+        OperationList ops = OperationList.builder()
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
+
+        forAnyFixture(ops, new ProcessorAssertion() {
+            @Override
+            public void run() {
+                if (this.sourceSize != null) {
+                    assertEquals(this.resultingImage.getWidth(),
+                            this.resultingImage.getWidth());
+                    assertEquals(this.sourceSize.height(),
+                            this.resultingImage.getHeight());
+                }
+            }
+        });
+    }
+
+    @Test
+    public void testProcessWithTurboJPEGNotAvailable() throws Exception {
+        TurboJPEGImageWriter.setTurboJPEGAvailable(false);
+
+        OperationList ops = OperationList.builder()
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
+
+        forAnyFixture(ops, new ProcessorAssertion() {
+            @Override
+            public void run() {
+                if (this.sourceSize != null) {
+                    assertEquals(this.resultingImage.getWidth(),
+                            this.resultingImage.getWidth());
+                    assertEquals(this.sourceSize.height(),
+                            this.resultingImage.getHeight());
+                }
+            }
+        });
+    }
+
+    @Test
+    @Disabled // see comment in GIFImageWriter, which most processors use to write GIFs
+    public void testProcessWritesXMPMetadataIntoGIF() throws Exception {
+        testProcessWritesXMPMetadata(Format.get("gif"));
+    }
+
+    @Test
+    public void testProcessWritesXMPMetadataIntoJPEG() throws Exception {
+        testProcessWritesXMPMetadata(Format.get("jpg"));
+    }
+
+    @Test
+    public void testProcessWritesXMPMetadataIntoPNG() throws Exception {
+        testProcessWritesXMPMetadata(Format.get("png"));
+    }
+
+    @Test
+    public void testProcessWritesXMPMetadataIntoTIFF() throws Exception {
+        testProcessWritesXMPMetadata(Format.get("tif"));
+    }
+
+    private void testProcessWritesXMPMetadata(Format outputFormat)
+            throws Exception {
+        final String xmp = "<rdf:RDF>this is some fake XMP</rdf:RDF>";
+        final Metadata metadata = new Metadata();
+        metadata.setXMP(xmp);
+
+        final Encode encode = new Encode(outputFormat);
+        encode.setMetadata(metadata);
+        final OperationList ops = OperationList.builder()
+                .withOperations(encode)
+                .build();
+
+        forEachFixture(ops, new ProcessorAssertion() {
+            @Override
+            public void run() {
+                String imageStr = new String(
+                        this.resultingRawImage, StandardCharsets.US_ASCII);
+                assertTrue(imageStr.contains(xmp));
+            }
+        });
+    }
+
     /* readInfo() */
 
     /**
@@ -534,25 +716,16 @@ abstract class AbstractProcessorTest extends BaseTest {
      * override it.
      */
     @Test
-    public void testReadImageInfoOnAllFixtures() throws Exception {
-        for (Format format : Format.values()) {
+    public void testReadInfoOnAllFixtures() throws Exception {
+        for (Format format : Format.all()) {
             for (Path fixture : TestUtil.getImageFixtures(format)) {
+                if (fixture.getFileName().toString().equals("jp2") ||
+                        fixture.getFileName().toString().equals("jp2-iptc.jp2") ||
+                        fixture.getFileName().toString().contains("incorrect-extension")) {
+                    continue;
+                }
                 try (final Processor proc = newInstance()) {
-                    // The processor will throw an exception if it doesn't support
-                    // this format, which is fine. No processor supports all
-                    // formats.
                     proc.setSourceFormat(format);
-
-                    // TODO: address these
-                    if (proc instanceof GraphicsMagickProcessor) {
-                        if (fixture.getFileName().toString().equals("jpg-rgb-594x522x8-baseline.jpg")) {
-                            continue;
-                        }
-                    } else if (proc instanceof ImageMagickProcessor) {
-                        if (fixture.getFileName().toString().contains("pdf")) {
-                            continue;
-                        }
-                    }
 
                     if (proc instanceof StreamProcessor) {
                         StreamProcessor sproc = (StreamProcessor) proc;
@@ -565,31 +738,27 @@ abstract class AbstractProcessorTest extends BaseTest {
                     }
 
                     // We don't know the dimensions of the source image and
-                    // we can't get them because that would require using
-                    // the method we are now testing, so the best we can do
-                    // is to assert that they are nonzero.
+                    // can't get them because that would require using the
+                    // method we are now testing, so the best we can do is to
+                    // assert that they are nonzero.
                     final Info actualInfo = proc.readInfo();
                     assertEquals(format, actualInfo.getSourceFormat());
-                    assertTrue(actualInfo.getSize().width() > DELTA);
-                    assertTrue(actualInfo.getSize().height() > DELTA);
+                    assertTrue(actualInfo.getSize().width() >= 1);
+                    assertTrue(actualInfo.getSize().height() >= 1);
 
-                    // Parse the resolution count from the filename, or
-                    // else assert 1.
+                    // Parse the resolution count from the filename.
                     int expectedNumResolutions = 1;
-                    if (fixture.getFileName().toString().equals("jp2")) {
-                        expectedNumResolutions = 6;
-                    } else {
-                        Pattern pattern = Pattern.compile("\\dres");
-                        Matcher matcher = pattern.matcher(fixture.getFileName().toString());
-                        if (matcher.find()) {
-                            expectedNumResolutions =
-                                    Integer.parseInt(matcher.group(0).substring(0, 1));
-                        }
+                    Pattern pattern = Pattern.compile("\\dres");
+                    Matcher matcher = pattern.matcher(fixture.getFileName().toString());
+                    if (matcher.find()) {
+                        expectedNumResolutions =
+                                Integer.parseInt(matcher.group(0).substring(0, 1));
+                        assertEquals(expectedNumResolutions,
+                                actualInfo.getNumResolutions());
                     }
-                    assertEquals(expectedNumResolutions,
-                            actualInfo.getNumResolutions());
-                } catch (UnsupportedSourceFormatException ignore) {
-                    // OK, continue
+                } catch (SourceFormatException ignore) {
+                    // The processor doesn't support this format, which is
+                    // fine. No processor supports all formats.
                 } catch (Exception e) {
                     System.err.println(format + " : " + fixture);
                     throw e;
@@ -598,21 +767,54 @@ abstract class AbstractProcessorTest extends BaseTest {
         }
     }
 
+    @Test
+    public void testReadInfoWithActualFormatDifferentFromSetFormat() throws Exception {
+        try (Processor proc = newInstance()) {
+            proc.setSourceFormat(getAnySupportedSourceFormat(proc));
+            Path fixture = TestUtil.getImage("unknown");
+            if (proc instanceof StreamProcessor) {
+                StreamProcessor sproc = (StreamProcessor) proc;
+                StreamFactory streamFactory = new PathStreamFactory(fixture);
+                sproc.setStreamFactory(streamFactory);
+            } else if (proc instanceof FileProcessor) {
+                FileProcessor fproc = (FileProcessor) proc;
+                fproc.setSourceFile(fixture);
+            }
+
+            assertThrows(SourceFormatException.class, proc::readInfo);
+        }
+    }
+
     /* setSourceFormat() */
 
     @Test
     public void testSetSourceFormatWithUnsupportedSourceFormat() {
-        for (Format format : Format.values()) {
-            try {
-                final Processor proc = newInstance();
+        for (Format format : Format.all()) {
+            try (Processor proc = newInstance()) {
                 proc.setSourceFormat(format);
                 if (proc.getAvailableOutputFormats().isEmpty()) {
                     fail("Expected exception");
                 }
-            } catch (UnsupportedSourceFormatException e) {
+            } catch (SourceFormatException e) {
                 // pass
             }
         }
+    }
+
+    @Test
+    public void testValidateWithIncompatibleOutputFormat() throws Exception {
+        boolean pass = false;
+        OperationList ops = OperationList.builder()
+                .withIdentifier(new Identifier("cats"))
+                .withOperations(new Encode(Format.UNKNOWN))
+                .build();
+        try (Processor proc = newInstance()) {
+            proc.setSourceFormat(getAnySupportedSourceFormat(proc));
+            proc.validate(ops, new Dimension(1000, 1000));
+        } catch (OutputFormatException e) {
+            pass = true;
+        }
+        assertTrue(pass);
     }
 
     /**
@@ -621,8 +823,7 @@ abstract class AbstractProcessorTest extends BaseTest {
      */
     void forEachFixture(final OperationList ops,
                         final ProcessorAssertion assertion) throws Exception {
-        Files.walkFileTree(TestUtil.getFixture("images"),
-                new SimpleFileVisitor<Path>() {
+        Files.walkFileTree(TestUtil.getFixture("images"), new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file,
                                              BasicFileAttributes attrs) throws IOException {
@@ -630,63 +831,11 @@ abstract class AbstractProcessorTest extends BaseTest {
                     return FileVisitResult.CONTINUE;
                 }
 
-                Set<Format> supportedFormats =
-                        getSupportedSourceFormats(newInstance());
+                Set<Format> supportedFormats = getSupportedSourceFormats(newInstance());
                 for (Format sourceFormat : supportedFormats) {
-                    final String fixtureName = file.getFileName().toString();
-
-                    Processor proc = newInstance();
-
-                    // These are used in other tests, but ImageIO doesn't like
-                    // them.
-                    if (new HashSet<>(Arrays.asList(
-                            "jpg-ycck.jpg", "jpg-icc-chunked.jpg")).contains(fixtureName)) {
-                        continue;
-                    }
-
-                    // TODO: address these
-                    if (proc instanceof Java2dProcessor || proc instanceof JaiProcessor) {
-                        if (fixtureName.equals("tif-rgba-1res-64x56x8-tiled-jpeg.tif") ||
-                                fixtureName.equals("tif-rgba-1res-64x56x8-striped-jpeg.tif")) {
-                            continue;
-                        }
-                    } else if (proc instanceof GraphicsMagickProcessor) {
-                        if (fixtureName.equals("jpg-rgb-594x522x8-baseline.jpg")) {
-                            continue;
-                        }
-                    } else if (proc instanceof ImageMagickProcessor) {
-                        if (fixtureName.contains("pdf")) {
-                            continue;
-                        }
-                    }
-
-                    // Don't test 1x1 images as they are problematic with
-                    // cropping & scaling.
-                    if (fixtureName.startsWith(sourceFormat.name().toLowerCase()) &&
-                            !fixtureName.contains("-1x1")) {
-                        // Extract the dimensions and sample size from the
-                        // fixture name to use in the assertion.
-                        Pattern pattern = Pattern.compile("\\d+x\\d+x\\d+");
-                        Matcher matcher = pattern.matcher(fixtureName);
-                        if (matcher.find()) {
-                            String match = matcher.group();
-                            String[] parts = match.split("x");
-                            if (parts.length > 1) {
-                                assertion.sourceSize = new Dimension(
-                                        Integer.parseInt(parts[0]),
-                                        Integer.parseInt(parts[1]));
-                            }
-                            if (parts.length > 2) {
-                                assertion.sourceSampleSize =
-                                        Integer.parseInt(parts[2]);
-                            }
-                        } else {
-                            assertion.sourceSize = null;
-                            assertion.sourceSampleSize = 0;
-                        }
-
+                    if (shouldTestAgainst(file, sourceFormat)) {
                         try {
-                            doProcessTest(file, sourceFormat, ops, assertion);
+                            forFixture(file, sourceFormat, ops, assertion);
                         } catch (Exception | AssertionError e) {
                             System.err.println("FAILED: " + file);
                             throw new IOException(e.getMessage(), e);
@@ -699,6 +848,111 @@ abstract class AbstractProcessorTest extends BaseTest {
     }
 
     /**
+     * Tests {@link Processor#process} with any one of the fixtures for any
+     * source format the processor supports.
+     */
+    void forAnyFixture(final OperationList ops,
+                       final ProcessorAssertion assertion) throws Exception {
+        final Map<Path,Format> fixtures = new HashMap<>();
+
+        Files.walkFileTree(TestUtil.getFixture("images"), new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file,
+                                             BasicFileAttributes attrs) {
+                if (assertion.skippedFixtures.contains(file.getFileName().toString())) {
+                    return FileVisitResult.CONTINUE;
+                }
+
+                Set<Format> supportedFormats =
+                        getSupportedSourceFormats(newInstance());
+                for (Format sourceFormat : supportedFormats) {
+                    if (shouldTestAgainst(file, sourceFormat)) {
+                        fixtures.put(file, sourceFormat);
+                    }
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+
+        Iterator<Path> it = fixtures.keySet().iterator();
+        if (it.hasNext()) {
+            Path path = it.next();
+            Format sourceFormat = fixtures.get(path);
+            try {
+                forFixture(it.next(), sourceFormat, ops, assertion);
+            } catch (Exception | AssertionError e) {
+                System.err.println("FAILED: " + path);
+                throw new IOException(e.getMessage(), e);
+            }
+        }
+    }
+
+    private boolean shouldTestAgainst(Path fixture, Format sourceFormat) {
+        final String fixtureName = fixture.getFileName().toString();
+
+        // Skip other formats.
+        if (!fixtureName.startsWith(sourceFormat.getName().toLowerCase())) {
+            return false;
+        }
+
+        // Don't test 1x1 images as they are problematic with
+        // cropping & scaling.
+        if (fixtureName.contains("-1x1")) {
+            return false;
+        }
+
+        // TODO: address some of these exclusions, perhaps move them into ProcessorAssertion.skippedFixtures
+        // These are used in other tests, but Image I/O doesn't like them.
+        if (Set.of("jpg-ycck.jpg", "jpg-icc-chunked.jpg").contains(fixtureName)) {
+            return false;
+        }
+
+        Processor proc = newInstance();
+        if (proc instanceof Java2dProcessor || proc instanceof JaiProcessor) {
+            if (fixtureName.equals("tif-rgba-1res-64x56x8-tiled-jpeg.tif") ||
+                    fixtureName.equals("tif-rgba-1res-64x56x8-striped-jpeg.tif")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Tests {@link Processor#process} with the given fixture.
+     */
+    void forFixture(final Path fixture,
+                    final Format sourceFormat,
+                    final OperationList ops,
+                    final ProcessorAssertion assertion) throws Exception {
+        // Extract the dimensions and sample size from the fixture name to use
+        // in the assertion.
+        Pattern pattern = Pattern.compile("\\d+x\\d+x\\d+");
+        Matcher matcher = pattern.matcher(fixture.getFileName().toString());
+        if (matcher.find()) {
+            String match = matcher.group();
+            String[] parts = match.split("x");
+            if (parts.length > 1) {
+                assertion.sourceSize = new Dimension(
+                        Integer.parseInt(parts[0]),
+                        Integer.parseInt(parts[1]));
+            }
+            if (parts.length > 2) {
+                assertion.sourceSampleSize = Integer.parseInt(parts[2]);
+            }
+        } else {
+            assertion.sourceSize = null;
+            assertion.sourceSampleSize = 0;
+        }
+
+        try {
+            doProcessTest(fixture, sourceFormat, ops, assertion);
+        } catch (Exception | AssertionError e) {
+            System.err.println("FAILED: " + fixture);
+            throw new IOException(e.getMessage(), e);
+        }
+    }
+
+    /**
      * Instantiates a processor, configures it with the given arguments, and
      * runs the given assertion.
      */
@@ -706,36 +960,18 @@ abstract class AbstractProcessorTest extends BaseTest {
                                final Format sourceFormat,
                                final OperationList opList,
                                final ProcessorAssertion assertion) throws Exception {
-        final Processor proc = newInstance(fixture, sourceFormat);
-        try {
+        try (Processor proc = newInstance(fixture, sourceFormat)) {
             ByteArrayOutputStream os = new ByteArrayOutputStream();
             proc.process(opList, proc.readInfo(), os);
+            final byte[] imageBytes = os.toByteArray();
 
-            ByteArrayInputStream is = new ByteArrayInputStream(os.toByteArray());
+            ByteArrayInputStream is = new ByteArrayInputStream(imageBytes);
             BufferedImage image = ImageIO.read(is);
 
-            assertion.opList = opList;
-            assertion.resultingImage = image;
+            assertion.opList            = opList;
+            assertion.resultingImage    = image;
+            assertion.resultingRawImage = imageBytes;
             assertion.run();
-        } catch (Exception | AssertionError e) {
-            System.err.println("Errored fixture: " + fixture);
-            System.err.println("Errored op list: " + opList);
-            throw e;
-        }
-    }
-
-    /**
-     * Instantiates a processor, configures it with the given arguments, and
-     * invokes {@link Processor#process} to write the result to the given
-     * output stream.
-     */
-    private void doProcessTest(final Path fixture,
-                               final Format sourceFormat,
-                               final OperationList opList,
-                               final OutputStream os) throws Exception {
-        final Processor proc = newInstance(fixture, sourceFormat);
-        try {
-            proc.process(opList, proc.readInfo(), os);
         } catch (Exception | AssertionError e) {
             System.err.println("Errored fixture: " + fixture);
             System.err.println("Errored op list: " + opList);

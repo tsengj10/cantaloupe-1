@@ -9,7 +9,6 @@ import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.util.DeletingFileVisitor;
 import edu.illinois.library.cantaloupe.util.StringUtils;
 import org.apache.commons.codec.binary.Hex;
-import org.apache.commons.io.output.NullOutputStream;
 import org.apache.commons.lang3.SystemUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -34,6 +34,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -116,7 +117,8 @@ class FilesystemCache implements SourceCache, DerivativeCache {
      * source image, or an {@link OperationList} corresponding to a derivative
      * image.</p>
      */
-    private static class ConcurrentFileOutputStream<T> extends OutputStream {
+    private static class ConcurrentFileOutputStream<T>
+            extends CompletableOutputStream {
 
         private static final Logger CFOS_LOGGER = LoggerFactory.
                 getLogger(ConcurrentFileOutputStream.class);
@@ -177,19 +179,18 @@ class FilesystemCache implements SourceCache, DerivativeCache {
                             "wrapped output stream: {}", e.getMessage());
                     }
 
-                    // If the written file isn't empty, move it into place.
+                    // If the written file is complete, move it into place.
                     // Otherwise, delete it.
-                    if (Files.size(tempFile) > 0) {
+                    if (isCompletelyWritten()) {
                         CFOS_LOGGER.debug("close(): moving {} to {}",
                                 tempFile, destinationFile);
-                        Files.move(tempFile, destinationFile);
+                        Files.move(tempFile, destinationFile,
+                                StandardCopyOption.REPLACE_EXISTING);
                     } else {
                         CFOS_LOGGER.debug("close(): deleting zero-byte file: {}",
                                 tempFile);
                         Files.delete(tempFile);
                     }
-                } catch (FileAlreadyExistsException e) {
-                    CFOS_LOGGER.debug("close(): {}", e.getMessage(), e);
                 } catch (IOException e) {
                     CFOS_LOGGER.warn("close(): {}", e.getMessage(), e);
                 } finally {
@@ -288,18 +289,18 @@ class FilesystemCache implements SourceCache, DerivativeCache {
 
     /**
      * Returns the last-accessed time of the given file. On some OS/filesystem
-     * combinations, this may be unreliable, in which case the last-modified
-     * time is returned instead.
+     * combinations, this may be unreliable or not available, in which case the
+     * last-modified time is returned instead.
      *
      * @param file File to check.
      * @return Last-accessed time of the given file, if available, or the
      *         last-modified time otherwise.
-     * @throws NoSuchFileException If the given file does not exist.
-     * @throws IOException If there is some other error.
+     * @throws NoSuchFileException if the given file does not exist.
+     * @throws IOException if there is some other error.
      */
     static FileTime getLastAccessedTime(Path file) throws IOException {
         try {
-            // Last-accessed time is not reliable on macOS+APFS as of 10.13.2.
+            // Last-accessed time is not reliable on macOS+APFS 10.13.2.
             if (SystemUtils.IS_OS_MAC) {
                 LOGGER.trace("macOS detected; using file last-modified " +
                         "instead of last-accessed times.");
@@ -425,7 +426,6 @@ class FilesystemCache implements SourceCache, DerivativeCache {
     }
 
     /**
-     * @param identifier
      * @return Path of an info file corresponding to the image with the given
      *         identifier.
      */
@@ -437,7 +437,6 @@ class FilesystemCache implements SourceCache, DerivativeCache {
     }
 
     /**
-     * @param identifier
      * @return Temporary info file corresponding to the image with the given
      *         identifier.
      */
@@ -519,7 +518,7 @@ class FilesystemCache implements SourceCache, DerivativeCache {
         try {
             return Files.list(cachePath)
                     .filter(p -> p.getFileName().toString().startsWith(expectedNamePrefix))
-                    .collect(Collectors.toSet());
+                    .collect(Collectors.toUnmodifiableSet());
         } catch (NoSuchFileException e) {
             LOGGER.debug("getDerivativeImageFiles(): no such file: {}", e.getMessage());
             return Collections.emptySet();
@@ -527,28 +526,28 @@ class FilesystemCache implements SourceCache, DerivativeCache {
     }
 
     @Override
-    public Info getImageInfo(Identifier identifier) throws IOException {
+    public Optional<Info> getInfo(Identifier identifier) throws IOException {
         final ReadWriteLock lock = acquireInfoLock(identifier);
         lock.readLock().lock();
-
         try {
             final Path cacheFile = infoFile(identifier);
             if (!isExpired(cacheFile)) {
-                LOGGER.debug("getImageInfo(): hit: {}", cacheFile);
-                return Info.fromJSON(cacheFile);
+                LOGGER.debug("getInfo(): hit: {}", cacheFile);
+                return Optional.of(Info.fromJSON(cacheFile));
             } else {
                 purgeAsync(cacheFile);
             }
         } catch (NoSuchFileException | FileNotFoundException e) {
-            LOGGER.debug("getImageInfo(): not found: {}", e.getMessage());
+            LOGGER.debug("getInfo(): not found: {}", e.getMessage());
         } finally {
             lock.readLock().unlock();
         }
-        return null;
+        return Optional.empty();
     }
 
     @Override
-    public Path getSourceImageFile(Identifier identifier) throws IOException {
+    public Optional<Path> getSourceImageFile(Identifier identifier)
+            throws IOException {
         synchronized (sourceImageWriteLock) {
             while (imagesBeingWritten.contains(identifier)) {
                 try {
@@ -561,19 +560,20 @@ class FilesystemCache implements SourceCache, DerivativeCache {
             }
         }
 
-        Path file = null;
         final Path cacheFile = sourceImageFile(identifier);
 
-        if (Files.exists(cacheFile)) {
+        try {
             if (!isExpired(cacheFile)) {
                 LOGGER.debug("getSourceImageFile(): hit: {} ({})",
                         identifier, cacheFile);
-                file = cacheFile;
+                return Optional.of(cacheFile);
             } else {
                 purgeAsync(cacheFile);
             }
+        } catch (NoSuchFileException e) {
+            LOGGER.debug("getSourceImageFile(): {} ", e.getMessage());
         }
-        return file;
+        return Optional.empty();
     }
 
     @Override
@@ -582,7 +582,7 @@ class FilesystemCache implements SourceCache, DerivativeCache {
         InputStream inputStream = null;
         final Path cacheFile = derivativeImageFile(ops);
 
-        if (Files.exists(cacheFile)) {
+        try {
             if (!isExpired(cacheFile)) {
                 try {
                     LOGGER.debug("newDerivativeImageInputStream(): hit: {} ({})",
@@ -594,6 +594,9 @@ class FilesystemCache implements SourceCache, DerivativeCache {
             } else {
                 purgeAsync(cacheFile);
             }
+        } catch (NoSuchFileException e) {
+            LOGGER.debug("newDerivativeImageInputStream(): {} ",
+                    e.getMessage());
         }
         return inputStream;
     }
@@ -607,8 +610,8 @@ class FilesystemCache implements SourceCache, DerivativeCache {
      * @throws IOException If anything goes wrong.
      */
     @Override
-    public OutputStream newDerivativeImageOutputStream(OperationList ops)
-            throws IOException {
+    public CompletableOutputStream
+    newDerivativeImageOutputStream(OperationList ops) throws IOException {
         return newOutputStream(ops, derivativeImageTempFile(ops),
                 derivativeImageFile(ops), derivativeImageWriteLock);
     }
@@ -624,8 +627,15 @@ class FilesystemCache implements SourceCache, DerivativeCache {
     @Override
     public OutputStream newSourceImageOutputStream(Identifier identifier)
             throws IOException {
-        return newOutputStream(identifier, sourceImageTempFile(identifier),
+        CompletableOutputStream os = newOutputStream(
+                identifier, sourceImageTempFile(identifier),
                 sourceImageFile(identifier), sourceImageWriteLock);
+        // ConcurrentFileOutputStream is a CompletableOutputStream in order to
+        // work with newDerivativeImageOutputStream(). But this method does not
+        // need that extra functionality, so setting it as completely written
+        // here makes it behave like an ordinary OutputStream.
+        os.setCompletelyWritten(true);
+        return os;
     }
 
     /**
@@ -637,18 +647,18 @@ class FilesystemCache implements SourceCache, DerivativeCache {
      * @return Output stream for writing.
      * @throws IOException IF anything goes wrong.
      */
-    private OutputStream newOutputStream(Object imageIdentifier,
-                                         Path tempFile,
-                                         Path destFile,
-                                         Object notifyObj) throws IOException {
+    private CompletableOutputStream newOutputStream(Object imageIdentifier,
+                                                    Path tempFile,
+                                                    Path destFile,
+                                                    Object notifyObj) throws IOException {
         // If the image is being written in another thread, it may (or may not)
         // be present in the imagesBeingWritten set. If so, return a null
         // output stream to avoid interfering.
         if (imagesBeingWritten.contains(imageIdentifier)) {
             LOGGER.debug("newOutputStream(): miss, but cache file for {} is " +
-                    "being written in another thread, so returning a {}",
-                    imageIdentifier, NullOutputStream.class.getSimpleName());
-            return new NullOutputStream();
+                    "being written in another thread, so returning a no-op stream",
+                    imageIdentifier);
+            return new CompletableNullOutputStream();
         }
 
         LOGGER.debug("newOutputStream(): miss; caching {}", imageIdentifier);
@@ -665,10 +675,9 @@ class FilesystemCache implements SourceCache, DerivativeCache {
             // The image either already exists in its complete form, or is
             // being written by another thread/process. Either way, there is no
             // need to write over it.
-            LOGGER.debug("newOutputStream(): {} already exists; returning a {}",
-                    tempFile.getParent(),
-                    NullOutputStream.class.getSimpleName());
-            return new NullOutputStream();
+            LOGGER.debug("newOutputStream(): {} already exists; returning a no-op stream",
+                    tempFile.getParent());
+            return new CompletableNullOutputStream();
         }
     }
 
@@ -884,16 +893,17 @@ class FilesystemCache implements SourceCache, DerivativeCache {
 
     @Override
     public void put(Identifier identifier, Info info) throws IOException {
+        if (!info.isPersistable()) {
+            LOGGER.debug("put(): info for {} is incomplete; ignoring",
+                    identifier);
+            return;
+        }
+        final Path destFile      = infoFile(identifier);
+        final Path tempFile      = infoTempFile(identifier);
         final ReadWriteLock lock = acquireInfoLock(identifier);
-
         lock.writeLock().lock();
-
-        final Path destFile = infoFile(identifier);
-        final Path tempFile = infoTempFile(identifier);
-
         try {
             LOGGER.debug("put(): writing {} to {}", identifier, tempFile);
-
             try {
                 // Create the containing directory.
                 Files.createDirectories(tempFile.getParent());
@@ -910,12 +920,44 @@ class FilesystemCache implements SourceCache, DerivativeCache {
             }
 
             LOGGER.debug("put(): moving {} to {}", tempFile, destFile);
-            Files.move(tempFile, destFile);
-        } catch (FileAlreadyExistsException e) {
-            // When this method runs concurrently with an equal Identifier
-            // argument, all of the other invocations of Files.move() will
-            // throw this, which is fine.
-            LOGGER.debug("put(): file already exists: {}", e.getMessage());
+            Files.move(tempFile, destFile, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            try {
+                Files.deleteIfExists(tempFile);
+            } catch (IOException e2) {
+                // Swallow this because the outer exception is more important.
+                LOGGER.error("put(): failed to delete file: {}",
+                        e2.getMessage());
+            }
+            throw e;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    @Override
+    public void put(Identifier identifier, String info) throws IOException {
+        final Path destFile      = infoFile(identifier);
+        final Path tempFile      = infoTempFile(identifier);
+        final ReadWriteLock lock = acquireInfoLock(identifier);
+        lock.writeLock().lock();
+        try {
+            LOGGER.debug("put(): writing {} to {}", identifier, tempFile);
+            try {
+                // Create the containing directory.
+                Files.createDirectories(tempFile.getParent());
+            } catch (FileAlreadyExistsException e) {
+                // When this method runs concurrently with an equal Identifier
+                // argument, all of the other invocations will throw this,
+                // which is fine.
+                LOGGER.debug("put(): failed to create directory: {}",
+                        e.getMessage());
+            }
+
+            Files.writeString(tempFile, info);
+
+            LOGGER.debug("put(): moving {} to {}", tempFile, destFile);
+            Files.move(tempFile, destFile, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             try {
                 Files.deleteIfExists(tempFile);

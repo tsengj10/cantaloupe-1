@@ -3,9 +3,9 @@ package edu.illinois.library.cantaloupe.resource.admin;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.resource.Route;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
@@ -16,7 +16,7 @@ import org.openqa.selenium.support.ui.Select;
 import java.net.URI;
 import java.net.URISyntaxException;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Functional test of the Control Panel using Selenium.
@@ -31,7 +31,7 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
     private static WebDriver webDriver;
 
     @Override
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         Configuration config = Configuration.getInstance();
@@ -50,7 +50,7 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
     }
 
     @Override
-    @After
+    @AfterEach
     public void tearDown() throws Exception {
         super.tearDown();
         webDriver.close();
@@ -93,8 +93,9 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
     }
 
     @Test
-    public void testApplicationSection() throws Exception {
+    void testApplicationSection() throws Exception {
         css("#cl-application-button > a").click();
+        Thread.sleep(100); // give the tab time to render
 
         // Fill in the form
 
@@ -104,7 +105,6 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         // Delegate Script
         inputNamed(Key.DELEGATE_SCRIPT_ENABLED).click();
         inputNamed(Key.DELEGATE_SCRIPT_PATHNAME).sendKeys("file");
-        inputNamed(Key.DELEGATE_METHOD_INVOCATION_CACHE_ENABLED).click();
 
         // Application log
         selectNamed(Key.APPLICATION_LOG_LEVEL).selectByValue("warn");
@@ -164,7 +164,6 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         // Delegate Script
         assertTrue(config.getBoolean(Key.DELEGATE_SCRIPT_ENABLED));
         assertEquals("file", config.getString(Key.DELEGATE_SCRIPT_PATHNAME));
-        assertTrue(config.getBoolean(Key.DELEGATE_METHOD_INVOCATION_CACHE_ENABLED));
 
         // Application log
         assertEquals("warn", config.getString(Key.APPLICATION_LOG_LEVEL));
@@ -228,24 +227,26 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
     }
 
     @Test
-    public void testServerSection() throws Exception {
+    void testServerSection() throws Exception {
         css("#cl-http-button > a").click();
+        Thread.sleep(100); // give the tab time to render
 
         // Fill in the form
         inputNamed(Key.HTTP_ENABLED).click();
         inputNamed(Key.HTTP_HOST).sendKeys("1.2.3.4");
         inputNamed(Key.HTTP_PORT).sendKeys("8989");
-        inputNamed(Key.HTTP_HTTP2_ENABLED).click();
         inputNamed(Key.HTTPS_ENABLED).click();
         inputNamed(Key.HTTPS_HOST).sendKeys("2.3.4.5");
         inputNamed(Key.HTTPS_PORT).sendKeys("8990");
         selectNamed(Key.HTTPS_KEY_STORE_TYPE).selectByVisibleText("PKCS12");
         inputNamed(Key.HTTPS_KEY_STORE_PATH).sendKeys("/something");
         inputNamed(Key.HTTPS_KEY_STORE_PASSWORD).sendKeys("cats");
-        inputNamed(Key.HTTPS_HTTP2_ENABLED).click();
+        inputNamed(Key.HTTP_MIN_THREADS).sendKeys("35");
+        inputNamed(Key.HTTP_MAX_THREADS).sendKeys("38");
         inputNamed(Key.HTTP_ACCEPT_QUEUE_LIMIT).sendKeys("50");
         inputNamed(Key.BASE_URI).sendKeys("http://bla/bla/");
         inputNamed(Key.SLASH_SUBSTITUTE).sendKeys("^");
+        inputNamed(Key.LOG_ERROR_RESPONSES).click();
         inputNamed(Key.PRINT_STACK_TRACE_ON_ERROR_PAGES).click();
 
         // Submit the form
@@ -258,36 +259,41 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         assertTrue(config.getBoolean(Key.HTTP_ENABLED));
         assertEquals("1.2.3.4", config.getString(Key.HTTP_HOST));
         assertEquals(8989, config.getInt(Key.HTTP_PORT));
-        assertTrue(config.getBoolean(Key.HTTP_HTTP2_ENABLED));
         assertTrue(config.getBoolean(Key.HTTPS_ENABLED));
         assertEquals("2.3.4.5", config.getString(Key.HTTPS_HOST));
         assertEquals(8990, config.getInt(Key.HTTPS_PORT));
         assertEquals("PKCS12", config.getString(Key.HTTPS_KEY_STORE_TYPE));
         assertEquals("/something", config.getString(Key.HTTPS_KEY_STORE_PATH));
         assertEquals("cats", config.getString(Key.HTTPS_KEY_STORE_PASSWORD));
-        assertTrue(config.getBoolean(Key.HTTPS_HTTP2_ENABLED));
+        assertEquals("35", config.getString(Key.HTTP_MIN_THREADS));
+        assertEquals("38", config.getString(Key.HTTP_MAX_THREADS));
         assertEquals("50", config.getString(Key.HTTP_ACCEPT_QUEUE_LIMIT));
         assertEquals("http://bla/bla/", config.getString(Key.BASE_URI));
         assertEquals("^", config.getString(Key.SLASH_SUBSTITUTE));
+        assertTrue(config.getBoolean(Key.LOG_ERROR_RESPONSES));
         assertTrue(config.getBoolean(Key.PRINT_STACK_TRACE_ON_ERROR_PAGES));
     }
 
     @Test
-    public void testEndpointsSection() throws Exception {
+    void testEndpointsSection() throws Exception {
         css("#cl-endpoints-button > a").click();
+        Thread.sleep(100); // give the tab time to render
 
         // Fill in the form
         inputNamed(Key.MAX_PIXELS).sendKeys("5000");
         inputNamed(Key.MAX_SCALE).sendKeys("1.1");
-        selectNamed(Key.IIIF_CONTENT_DISPOSITION).selectByValue("attachment");
         inputNamed(Key.IIIF_MIN_SIZE).sendKeys("75");
         inputNamed(Key.IIIF_MIN_TILE_SIZE).sendKeys("250");
+        inputNamed(Key.IIIF_RESTRICT_TO_SIZES).click();
         inputNamed(Key.IIIF_1_ENDPOINT_ENABLED).click();
         inputNamed(Key.IIIF_2_ENDPOINT_ENABLED).click();
-        inputNamed(Key.IIIF_2_RESTRICT_TO_SIZES).click();
+        inputNamed(Key.IIIF_3_ENDPOINT_ENABLED).click();
         inputNamed(Key.API_ENABLED).click();
         inputNamed(Key.API_USERNAME).sendKeys("cats");
         inputNamed(Key.API_SECRET).sendKeys("dogs");
+        inputNamed(Key.META_IDENTIFIER_TRANSFORMER).sendKeys("Bla");
+        css("#cl-endpoints li > a[href=\"#StandardMetaIdentifierTransformer\"]").click();
+        inputNamed(Key.STANDARD_META_IDENTIFIER_TRANSFORMER_DELIMITER).sendKeys("---");
 
         // Submit the form
         css("#cl-endpoints input[type=\"submit\"]").click();
@@ -298,21 +304,25 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         final Configuration config = Configuration.getInstance();
         assertEquals(5000, config.getLong(Key.MAX_PIXELS));
         assertEquals(1.1, config.getDouble(Key.MAX_SCALE), DELTA);
-        assertEquals("attachment",
-                config.getString(Key.IIIF_CONTENT_DISPOSITION));
         assertEquals(75, config.getInt(Key.IIIF_MIN_SIZE));
         assertEquals(250, config.getInt(Key.IIIF_MIN_TILE_SIZE));
+        assertTrue(config.getBoolean(Key.IIIF_RESTRICT_TO_SIZES));
         assertTrue(config.getBoolean(Key.IIIF_1_ENDPOINT_ENABLED));
         assertTrue(config.getBoolean(Key.IIIF_2_ENDPOINT_ENABLED));
-        assertTrue(config.getBoolean(Key.IIIF_2_RESTRICT_TO_SIZES));
+        assertTrue(config.getBoolean(Key.IIIF_3_ENDPOINT_ENABLED));
         assertTrue(config.getBoolean(Key.API_ENABLED));
         assertEquals("cats", config.getString(Key.API_USERNAME));
         assertEquals("dogs", config.getString(Key.API_SECRET));
+        assertEquals("StandardMetaIdentifierTransformer",
+                config.getString(Key.META_IDENTIFIER_TRANSFORMER));
+        assertEquals("---",
+                config.getString(Key.STANDARD_META_IDENTIFIER_TRANSFORMER_DELIMITER));
     }
 
     @Test
-    public void testSourceSection() throws Exception {
+    void testSourceSection() throws Exception {
         css("#cl-source-button > a").click();
+        Thread.sleep(100); // give the tab time to render
 
         // Fill in the form
         selectNamed(Key.SOURCE_DELEGATE).selectByValue("false");
@@ -324,6 +334,7 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         inputNamed(Key.S3SOURCE_SECRET_KEY).sendKeys("456");
         inputNamed(Key.S3SOURCE_BUCKET_NAME).sendKeys("cats");
         inputNamed(Key.S3SOURCE_ENDPOINT).sendKeys("http://localhost:1234");
+        inputNamed(Key.S3SOURCE_REGION).sendKeys("us-east-2");
         inputNamed(Key.S3SOURCE_CHUNKING_ENABLED).click();
         inputNamed(Key.S3SOURCE_CHUNK_SIZE).sendKeys("453");
         inputNamed(Key.S3SOURCE_CHUNK_CACHE_ENABLED).click();
@@ -389,6 +400,8 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
                 config.getString(Key.S3SOURCE_BUCKET_NAME));
         assertEquals("http://localhost:1234",
                 config.getString(Key.S3SOURCE_ENDPOINT));
+        assertEquals("us-east-2",
+                config.getString(Key.S3SOURCE_REGION));
         assertTrue(
                 config.getBoolean(Key.S3SOURCE_CHUNKING_ENABLED));
         assertEquals("453",
@@ -462,15 +475,16 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
     }
 
     @Test
-    public void testProcessorsSection() throws Exception {
+    void testProcessorsSection() throws Exception {
         css("#cl-processors-button > a").click();
+        Thread.sleep(100); // give the tab time to render
 
         // Fill in the form
         selectNamed(Key.PROCESSOR_SELECTION_STRATEGY).
                 selectByVisibleText("Manual");
         css("#cl-processors li > a[href=\"#cl-image-assignments\"]").click();
-        selectNamed("processor.ManualSelectionStrategy.gif")
-                .selectByVisibleText("Java2dProcessor");
+        selectNamed("processor.ManualSelectionStrategy.gif").
+                selectByVisibleText("Java2dProcessor");
         selectNamed(Key.PROCESSOR_FALLBACK).selectByVisibleText("JaiProcessor");
         selectNamed(Key.PROCESSOR_STREAM_RETRIEVAL_STRATEGY).
                 selectByValue("StreamStrategy");
@@ -482,30 +496,28 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
                 selectByVisibleText("Triangle");
         selectNamed(Key.PROCESSOR_DOWNSCALE_FILTER).
                 selectByVisibleText("Mitchell");
+        inputNamed(Key.PROCESSOR_DOWNSCALE_LINEAR).click();
         inputNamed(Key.PROCESSOR_SHARPEN).sendKeys("0.2");
-        inputNamed(Key.PROCESSOR_PRESERVE_METADATA).click();
         inputNamed(Key.PROCESSOR_JPG_PROGRESSIVE).click();
         inputNamed(Key.PROCESSOR_JPG_QUALITY).sendKeys("55");
         selectNamed(Key.PROCESSOR_TIF_COMPRESSION).selectByVisibleText("LZW");
         // FfmpegProcessor
         css("#cl-processors li > a[href=\"#FfmpegProcessor\"]").click();
         inputNamed(Key.FFMPEGPROCESSOR_PATH_TO_BINARIES).sendKeys("/ffpath");
-        // GraphicsMagickProcessor
-        css("#cl-processors li > a[href=\"#GraphicsMagickProcessor\"]").click();
-        inputNamed(Key.GRAPHICSMAGICKPROCESSOR_PATH_TO_BINARIES).sendKeys("/gmpath");
-        // ImageMagickProcessor
-        css("#cl-processors li > a[href=\"#ImageMagickProcessor\"]").click();
-        inputNamed(Key.IMAGEMAGICKPROCESSOR_PATH_TO_BINARIES).sendKeys("/impath");
         // JaiProcessor
         css("#cl-processors li > a[href=\"#JaiProcessor\"]").click();
         // Java2dProcessor
         css("#cl-processors li > a[href=\"#Java2dProcessor\"]").click();
-        // KakaduDemoProcessor
-        css("#cl-processors li > a[href=\"#KakaduDemoProcessor\"]").click();
-        inputNamed(Key.KAKADUDEMOPROCESSOR_PATH_TO_BINARIES).sendKeys("/kpath");
         // OpenJpegProcessor
         css("#cl-processors li > a[href=\"#OpenJpegProcessor\"]").click();
         inputNamed(Key.OPENJPEGPROCESSOR_PATH_TO_BINARIES).sendKeys("/ojpath");
+        // GrokProcessor
+        css("#cl-processors li > a[href=\"#GrokProcessor\"]").click();
+        inputNamed(Key.GROKPROCESSOR_PATH_TO_BINARIES).sendKeys("/grkpath");
+        // PdfBoxProcessor
+        css("#cl-processors li > a[href=\"#PdfBoxProcessor\"]").click();
+        inputNamed(Key.PROCESSOR_PDF_SCRATCH_FILE_ENABLED).click();
+        inputNamed(Key.PROCESSOR_PDF_MAX_MEMORY_BYTES).sendKeys("-1");
 
         // Submit the form
         css("#cl-processors input[type=\"submit\"]").click();
@@ -529,33 +541,31 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
                 config.getString(Key.PROCESSOR_UPSCALE_FILTER));
         assertEquals("mitchell",
                 config.getString(Key.PROCESSOR_DOWNSCALE_FILTER));
+        assertTrue(config.getBoolean(Key.PROCESSOR_DOWNSCALE_LINEAR));
         assertEquals("0.2", config.getString(Key.PROCESSOR_SHARPEN));
-        assertTrue(config.getBoolean(Key.PROCESSOR_PRESERVE_METADATA));
         assertEquals("true", config.getString(Key.PROCESSOR_JPG_PROGRESSIVE));
         assertEquals("55", config.getString(Key.PROCESSOR_JPG_QUALITY));
         assertEquals("LZW", config.getString(Key.PROCESSOR_TIF_COMPRESSION));
         // FfmpegProcessor
         assertEquals("/ffpath",
                 config.getString(Key.FFMPEGPROCESSOR_PATH_TO_BINARIES));
-        // GraphicsMagickProcessor
-        assertEquals("/gmpath",
-                config.getString(Key.GRAPHICSMAGICKPROCESSOR_PATH_TO_BINARIES));
-        // ImageMagickProcessor
-        assertEquals("/impath",
-                config.getString(Key.IMAGEMAGICKPROCESSOR_PATH_TO_BINARIES));
         // JaiProcessor
         // Java2dProcessor
-        // KakaduDemoProcessor
-        assertEquals("/kpath",
-                config.getString(Key.KAKADUDEMOPROCESSOR_PATH_TO_BINARIES));
         // OpenJpegProcessor
         assertEquals("/ojpath",
                 config.getString(Key.OPENJPEGPROCESSOR_PATH_TO_BINARIES));
+        // GrokProcessor
+        assertEquals("/grkpath",
+                config.getString(Key.GROKPROCESSOR_PATH_TO_BINARIES));
+        // PdfBoxProcessor
+        assertEquals(-1,
+                config.getLongBytes(Key.PROCESSOR_PDF_MAX_MEMORY_BYTES));
     }
 
     @Test
-    public void testCachesSection() throws Exception {
+    void testCachesSection() throws Exception {
         css("#cl-caches-button > a").click();
+        Thread.sleep(100); // give the tab time to render
 
         // Fill in the form
         inputNamed(Key.CLIENT_CACHE_ENABLED).click();
@@ -584,8 +594,8 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         inputNamed(Key.S3CACHE_SECRET_KEY).sendKeys("dogs");
         inputNamed(Key.S3CACHE_BUCKET_NAME).sendKeys("bucket");
         inputNamed(Key.S3CACHE_ENDPOINT).sendKeys("localhost:1234");
+        inputNamed(Key.S3CACHE_REGION).sendKeys("us-east-2");
         inputNamed(Key.S3CACHE_OBJECT_KEY_PREFIX).sendKeys("obj");
-        inputNamed(Key.S3CACHE_MAX_CONNECTIONS).sendKeys("35");
         // AzureStorageCache
         css("#cl-caches li > a[href=\"#AzureStorageCache\"]").click();
         inputNamed(Key.AZURESTORAGECACHE_ACCOUNT_NAME).sendKeys("bees");
@@ -650,8 +660,8 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         assertEquals("dogs", config.getString(Key.S3CACHE_SECRET_KEY));
         assertEquals("bucket", config.getString(Key.S3CACHE_BUCKET_NAME));
         assertEquals("localhost:1234", config.getString(Key.S3CACHE_ENDPOINT));
+        assertEquals("us-east-2", config.getString(Key.S3CACHE_REGION));
         assertEquals("obj", config.getString(Key.S3CACHE_OBJECT_KEY_PREFIX));
-        assertEquals("35", config.getString(Key.S3CACHE_MAX_CONNECTIONS));
         // AzureStorageCache
         assertEquals("bees", config.getString(Key.AZURESTORAGECACHE_ACCOUNT_NAME));
         assertEquals("birds", config.getString(Key.AZURESTORAGECACHE_ACCOUNT_KEY));
@@ -681,8 +691,9 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
     }
 
     @Test
-    public void testOverlaysSection() throws Exception {
+    void testOverlaysSection() throws Exception {
         css("#cl-overlays-button > a").click();
+        Thread.sleep(100); // give the tab time to render
 
         // Fill in the form
         inputNamed(Key.OVERLAY_ENABLED).click();
@@ -703,7 +714,6 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
         inputNamed(Key.OVERLAY_STRING_STROKE_COLOR).sendKeys("#e0e0e0");
         inputNamed(Key.OVERLAY_STRING_STROKE_WIDTH).sendKeys("5");
         inputNamed(Key.OVERLAY_STRING_BACKGROUND_COLOR).sendKeys("#ffd000");
-        inputNamed(Key.REDACTION_ENABLED).click();
 
         // Submit the form
         css("#cl-overlays input[type=\"submit\"]").click();
@@ -747,7 +757,6 @@ public class AdminResourceUITest extends AbstractAdminResourceTest {
                 config.getString(Key.OVERLAY_STRING_STROKE_WIDTH));
         assertEquals("#ffd000",
                 config.getString(Key.OVERLAY_STRING_BACKGROUND_COLOR));
-        assertTrue(config.getBoolean(Key.REDACTION_ENABLED));
     }
 
 }

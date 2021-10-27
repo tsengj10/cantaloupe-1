@@ -1,49 +1,59 @@
 package edu.illinois.library.cantaloupe.util;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import edu.illinois.library.cantaloupe.Application;
+
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class SystemUtils {
 
-    private static final Pattern JAVA_VERSION_PATTERN =
-            Pattern.compile("^(\\d+)");
+    private static final AtomicBoolean exitRequested     = new AtomicBoolean();
+    private static final AtomicInteger requestedExitCode = new AtomicInteger();
 
     /**
-     * @return Java major version such as <code>8</code>, <code>9</code>, etc.
+     * Clears any exit request created by {@link #exit(int)}.
      */
-    public static int getJavaMajorVersion() {
-        final String versionStr = System.getProperty("java.version");
-        return parseJavaMajorVersion(versionStr);
+    public static synchronized void clearExitRequest() {
+        exitRequested.set(false);
+        requestedExitCode.set(0);
     }
 
     /**
-     * @param version Value of the {@code java.version} system property.
-     * @return Major version.
-     * @throws IllegalArgumentException if the argument is illegal, which would
-     *         probably indicate a bug.
+     * <p>Conditionally exits depending on the return value of {@link
+     * Application#isTesting()}:</p>
+     *
+     * <ol>
+     *     <li>If that method returns {@code false}, {@link System#exit(int)}
+     *     is called.</li>
+     *     <li>Otherwise, it is not called, but subsequent calls to {@link
+     *     #exitRequested()} will return {@code true}, and {@link
+     *     #requestedExitCode()} will return the requested exit code.</li>
+     * </ol>
+     *
+     * @param code Status code.
      */
-    static int parseJavaMajorVersion(String version) {
-        // Up to Java 8, this will be a string like: "1.8.0_60"
-        // Beginning in Java 9, it will be a string like "9", "9.0.1", etc.
-        // See: https://www.oracle.com/java/technologies/javase/versioning-naming.html
-        if (version.startsWith("1.")) { // <= 8
-            String[] parts = version.split(Pattern.quote("."));
-            if (parts.length > 1) {
-                return Integer.parseInt(parts[1]);
-            }
+    public static void exit(int code) {
+        if (Application.isTesting()) {
+            exitRequested.set(true);
+            requestedExitCode.set(code);
+        } else {
+            System.exit(code);
         }
-        Matcher matcher = JAVA_VERSION_PATTERN.matcher(version);
-        if (matcher.find()) {
-            return Integer.parseInt(matcher.group(1));
-        }
-        throw new IllegalArgumentException("Unrecognized version: " + version);
     }
 
     /**
-     * ALPN is built into Java 9 and later.
+     * @return Whether {@link #exit(int)} has been invoked.
      */
-    public static boolean isALPNAvailable() {
-        return getJavaMajorVersion() >= 9;
+    public static boolean exitRequested() {
+        return exitRequested.get();
+    }
+
+    /**
+     * @return Exit code passed to {@link #exit(int)}. This is meaningless
+     *         unless {@link #exitRequested()} returns {@code true}.
+     */
+    public static int requestedExitCode() {
+        return requestedExitCode.get();
     }
 
     private SystemUtils() {}

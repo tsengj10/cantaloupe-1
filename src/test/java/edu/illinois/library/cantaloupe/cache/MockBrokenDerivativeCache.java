@@ -6,22 +6,24 @@ import edu.illinois.library.cantaloupe.operation.OperationList;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
+import java.util.Optional;
 
 public class MockBrokenDerivativeCache implements DerivativeCache {
 
     @Override
-    public Info getImageInfo(Identifier identifier) throws IOException {
+    public Optional<Info> getInfo(Identifier identifier) throws IOException {
         throw new IOException("I'm broken");
     }
 
     @Override
-    public InputStream newDerivativeImageInputStream(OperationList opList) throws IOException {
+    public InputStream newDerivativeImageInputStream(OperationList opList)
+            throws IOException {
         throw new IOException("I'm broken");
     }
 
     @Override
-    public OutputStream newDerivativeImageOutputStream(OperationList opList) throws IOException {
+    public CompletableOutputStream
+    newDerivativeImageOutputStream(OperationList opList) throws IOException {
         throw new IOException("I'm broken");
     }
 
@@ -46,7 +48,12 @@ public class MockBrokenDerivativeCache implements DerivativeCache {
     }
 
     @Override
-    public void put(Identifier identifier, Info imageInfo) throws IOException {
+    public void put(Identifier identifier, Info info) throws IOException {
+        throw new IOException("I'm broken");
+    }
+
+    @Override
+    public void put(Identifier identifier, String info) throws IOException {
         throw new IOException("I'm broken");
     }
 

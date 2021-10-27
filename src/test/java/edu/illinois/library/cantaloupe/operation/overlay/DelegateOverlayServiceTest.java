@@ -8,50 +8,55 @@ import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.operation.Color;
 import edu.illinois.library.cantaloupe.operation.Encode;
 import edu.illinois.library.cantaloupe.operation.OperationList;
-import edu.illinois.library.cantaloupe.resource.RequestContext;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.DelegateProxyService;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
 import org.apache.commons.lang3.SystemUtils;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.awt.font.TextAttribute;
 import java.net.URI;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class DelegateOverlayServiceTest extends BaseTest {
 
     private DelegateOverlayService instance;
 
-    @Before
-    public void setUp() throws Exception {
-        super.setUp();
+    /* isAvailable() */
 
-        Configuration config = Configuration.getInstance();
-        config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-        config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                TestUtil.getFixture("delegates.rb").toString());
-
-        instance = new DelegateOverlayService();
+    @Test
+    void testIsAvailableWhenAvailable() {
+        TestUtil.newDelegateProxy();
+        instance = new DelegateOverlayService(null);
+        assertTrue(instance.isAvailable());
     }
 
     @Test
-    public void testGetOverlayReturningImageOverlay() throws Exception {
-        final Identifier identifier = new Identifier("image");
-        final Dimension fullSize = new Dimension(500, 500);
-        final OperationList opList = new OperationList(
-                identifier, new Encode(Format.JPG));
-        final RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        context.setOperationList(opList, fullSize);
+    void testIsAvailableWhenNotAvailable() {
+        Configuration config = Configuration.getInstance();
+        config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, false);
+        instance = new DelegateOverlayService(null);
+        assertFalse(instance.isAvailable());
+    }
 
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+    /* newOverlay() */
 
-        final ImageOverlay overlay = (ImageOverlay) instance.getOverlay(proxy);
+    @Test
+    void testNewOverlayReturningImageOverlay() throws Exception {
+        final Identifier identifier  = new Identifier("image");
+        final Dimension fullSize     = new Dimension(500, 500);
+        final OperationList opList   = OperationList.builder()
+                .withIdentifier(identifier)
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
+        proxy.getRequestContext().setOperationList(opList, fullSize);
+
+        instance = new DelegateOverlayService(proxy);
+
+        final ImageOverlay overlay = (ImageOverlay) instance.newOverlay();
         if (SystemUtils.IS_OS_WINDOWS) {
             assertEquals(new URI("file:///C:/dev/cats"), overlay.getURI());
         } else {
@@ -62,20 +67,20 @@ public class DelegateOverlayServiceTest extends BaseTest {
     }
 
     @Test
-    public void testGetOverlayReturningStringOverlay() throws Exception {
-        final Identifier identifier = new Identifier("string");
-        final Dimension fullSize = new Dimension(500, 500);
-        final OperationList opList = new OperationList(
-                identifier, new Encode(Format.JPG));
-        final RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        context.setOperationList(opList, fullSize);
+    void testNewOverlayReturningStringOverlay() throws Exception {
+        final Identifier identifier  = new Identifier("string");
+        final Dimension fullSize     = new Dimension(500, 500);
+        final OperationList opList   = OperationList.builder()
+                .withIdentifier(identifier)
+                .withOperations(new Encode(Format.get("jpg")))
+                .build();
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
+        proxy.getRequestContext().setOperationList(opList, fullSize);
 
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        instance = new DelegateOverlayService(proxy);
 
-        final StringOverlay overlay =
-                (StringOverlay) instance.getOverlay(proxy);
+        final StringOverlay overlay = (StringOverlay) instance.newOverlay();
         assertEquals("dogs\ndogs", overlay.getString());
         assertEquals("SansSerif", overlay.getFont().getName());
         assertEquals(20, overlay.getFont().getSize());
@@ -88,15 +93,15 @@ public class DelegateOverlayServiceTest extends BaseTest {
         assertEquals(Color.BLUE, overlay.getStrokeColor());
         assertEquals(new Color(12, 23, 34, 45), overlay.getBackgroundColor());
         assertEquals(3, overlay.getStrokeWidth(), 0.00001f);
+        assertFalse(overlay.isWordWrap());
     }
 
     @Test
-    public void testGetOverlayReturningNull() throws Exception {
-        final RequestContext context = new RequestContext();
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+    void testNewOverlayReturningNull() throws Exception {
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        instance = new DelegateOverlayService(proxy);
 
-        Overlay overlay = instance.getOverlay(proxy);
+        Overlay overlay = instance.newOverlay();
         assertNull(overlay);
     }
 

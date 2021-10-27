@@ -3,13 +3,9 @@ package edu.illinois.library.cantaloupe.processor.codec;
 import edu.illinois.library.cantaloupe.image.Compression;
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.image.Metadata;
-import edu.illinois.library.cantaloupe.image.Orientation;
 import edu.illinois.library.cantaloupe.image.Rectangle;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.Crop;
-import edu.illinois.library.cantaloupe.operation.CropByPercent;
-import edu.illinois.library.cantaloupe.operation.Operation;
-import edu.illinois.library.cantaloupe.operation.OperationList;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
 import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
@@ -80,21 +76,18 @@ final class DelegatingImageReader implements ImageReader {
     }
 
     @Override
-    public BufferedImage read(OperationList ops, Orientation orientation, ReductionFactor reductionFactor, Set<ReaderHint> hints) throws IOException {
-        for (Operation op : ops) {
-            LOGGER.info("CANTALOUPE: Op = " + op);
-        }
+    public BufferedImage read(final int imageIndex,
+                              final Crop crop,
+                              final Scale scale,
+                              final ScaleConstraint scaleConstraint,
+                              final ReductionFactor reductionFactor,
+                              final Set<ReaderHint> hints) throws IOException {
+
         LOGGER.info("CANTALOUPE: ReductionFactor=" + reductionFactor);
         LOGGER.info("CANTALOUPE: hints=" + hints);
 
-        Scale scale = (Scale) ops.getFirst(Scale.class);
-        Crop crop = (Crop) ops.getFirst(Crop.class);
-        if (crop == null) {
-            crop = new CropByPercent();
-        }
         LOGGER.info("CANTALOUPE: scale=" + scale);
         LOGGER.info("CANTALOUPE: crop=" + crop);
-        ScaleConstraint scaleConstraint = ops.getScaleConstraint();
         final Dimension fullSize = getSize(0);
         final Rectangle regionRect = crop.getRectangle(fullSize, new ReductionFactor(), scaleConstraint);
         LOGGER.info("CANTALOUPE: regionRect=" + regionRect);
@@ -144,7 +137,7 @@ final class DelegatingImageReader implements ImageReader {
     }
 
     @Override
-    public BufferedImage read() throws IOException {
+    public BufferedImage read(int imageIndex) throws IOException {
         throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
 
@@ -201,7 +194,12 @@ final class DelegatingImageReader implements ImageReader {
     }
 
     @Override
-    public RenderedImage readRendered(OperationList opList, Orientation orientation, ReductionFactor reductionFactor, Set<ReaderHint> hints) throws IOException {
+    public RenderedImage readRendered(int imaageIndex, Crop crop, Scale scale, ScaleConstraint scaleConstraint, ReductionFactor reductionFactor, Set<ReaderHint> hints) throws IOException {
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    }
+
+    @Override
+    public BufferedImageSequence readSequence() throws IOException {
         throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
 

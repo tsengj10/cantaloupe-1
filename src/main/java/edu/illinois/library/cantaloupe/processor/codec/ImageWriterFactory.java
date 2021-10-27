@@ -2,16 +2,19 @@ package edu.illinois.library.cantaloupe.processor.codec;
 
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.operation.Encode;
+import edu.illinois.library.cantaloupe.processor.OutputFormatException;
+import edu.illinois.library.cantaloupe.processor.codec.gif.GIFImageWriter;
+import edu.illinois.library.cantaloupe.processor.codec.jpeg.JPEGImageWriter;
+import edu.illinois.library.cantaloupe.processor.codec.png.PNGImageWriter;
+import edu.illinois.library.cantaloupe.processor.codec.tiff.TIFFImageWriter;
 
-import java.util.Collections;
-import java.util.EnumSet;
 import java.util.Set;
 
 public final class ImageWriterFactory {
 
-    private static final Set<Format> SUPPORTED_FORMATS =
-            Collections.unmodifiableSet(EnumSet.of(Format.GIF, Format.JPG,
-                    Format.PNG, Format.TIF));
+    private static final Set<Format> SUPPORTED_FORMATS = Set.of(
+            Format.get("gif"), Format.get("jpg"), Format.get("png"),
+            Format.get("tif"));
 
     /**
      * @return Set of supported output formats.
@@ -20,27 +23,20 @@ public final class ImageWriterFactory {
         return SUPPORTED_FORMATS;
     }
 
-    public ImageWriter newImageWriter(Encode encode) {
+    public ImageWriter newImageWriter(Encode encode)
+            throws OutputFormatException {
         ImageWriter writer;
-
-        switch (encode.getFormat()) {
-            case GIF:
-                writer = new GIFImageWriter();
-                break;
-            case JPG:
-                writer = new JPEGImageWriter();
-                break;
-            case PNG:
-                writer = new PNGImageWriter();
-                break;
-            case TIF:
-                writer = new TIFFImageWriter();
-                break;
-            default:
-                throw new IllegalArgumentException(
-                        "Unsupported output format: " + encode.getFormat());
+        if (Format.get("gif").equals(encode.getFormat())) {
+            writer = new GIFImageWriter();
+        } else if (Format.get("jpg").equals(encode.getFormat())) {
+            writer = new JPEGImageWriter();
+        } else if (Format.get("png").equals(encode.getFormat())) {
+            writer = new PNGImageWriter();
+        } else if (Format.get("tif").equals(encode.getFormat())) {
+            writer = new TIFFImageWriter();
+        } else {
+            throw new OutputFormatException(encode.getFormat());
         }
-
         writer.setEncode(encode);
         return writer;
     }

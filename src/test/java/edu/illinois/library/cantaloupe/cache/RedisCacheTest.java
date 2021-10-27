@@ -4,7 +4,7 @@ import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.test.ConfigurationConstants;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class RedisCacheTest extends AbstractCacheTest {
 
@@ -24,18 +24,20 @@ public class RedisCacheTest extends AbstractCacheTest {
         config.setProperty(Key.REDISCACHE_DATABASE,
                 testConfig.getProperty(ConfigurationConstants.REDIS_DATABASE.getKey()));
 
-        return new RedisCache();
+        RedisCache instance = new RedisCache();
+        instance.purge();
+        return instance;
     }
 
 
-    /* getImageInfo(Identifier) */
+    /* getInfo(Identifier) */
 
     /**
      * Override that does nothing, as validity is determined by Redis.
      */
     @Override
     @Test
-    public void testGetImageInfoWithExistingInvalidImage() {}
+    void testGetInfoWithExistingInvalidImage() {}
 
     /* newDerivativeImageInputStream(OperationList) */
 
@@ -44,7 +46,7 @@ public class RedisCacheTest extends AbstractCacheTest {
      */
     @Override
     @Test
-    public void testNewDerivativeImageInputStreamWithNonzeroTTL() {}
+    void testNewDerivativeImageInputStreamWithNonzeroTTL() {}
 
     /* purgeInvalid() */
 
@@ -53,6 +55,6 @@ public class RedisCacheTest extends AbstractCacheTest {
      */
     @Test
     @Override
-    public void testPurgeInvalid() {}
+    void testPurgeInvalid() {}
 
 }

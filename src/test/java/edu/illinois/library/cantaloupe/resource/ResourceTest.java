@@ -9,45 +9,44 @@ import edu.illinois.library.cantaloupe.http.Client;
 import edu.illinois.library.cantaloupe.test.BaseTest;
 import edu.illinois.library.cantaloupe.test.TestUtil;
 import edu.illinois.library.cantaloupe.util.SocketUtils;
-import edu.illinois.library.cantaloupe.util.SystemUtils;
-import org.junit.After;
-import org.junit.Before;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.net.URI;
 import java.net.URISyntaxException;
 
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Abstract base class for functional HTTP endpoint tests.
  */
 public abstract class ResourceTest extends BaseTest {
 
-    protected static int HTTP_PORT = SocketUtils.getOpenPort();
-    protected static int HTTPS_PORT;
-
     protected static ApplicationServer appServer;
 
     protected Client client;
-
-    static {
-        do {
-            HTTPS_PORT = SocketUtils.getOpenPort();
-        } while (HTTPS_PORT == HTTP_PORT);
-    }
+    private int httpPort, httpsPort;
 
     @Override
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
 
+        httpPort = SocketUtils.getOpenPort();
+        do {
+            httpsPort = SocketUtils.getOpenPort();
+        } while (httpsPort == httpPort);
+
         final Configuration config = Configuration.getInstance();
+        config.setProperty(Key.MAX_SCALE, 0);
         config.setProperty(Key.ADMIN_ENABLED, true);
         config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
         config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
                 TestUtil.getFixture("delegates.rb").toString());
         config.setProperty(Key.PROCESSOR_SELECTION_STRATEGY,
                 "ManualSelectionStrategy");
+        config.setProperty("processor.ManualSelectionStrategy.pdf",
+                "PdfBoxProcessor");
         config.setProperty(Key.PROCESSOR_FALLBACK, "Java2dProcessor");
         config.setProperty(Key.SOURCE_STATIC, "FilesystemSource");
         config.setProperty(Key.FILESYSTEMSOURCE_LOOKUP_STRATEGY,
@@ -57,26 +56,23 @@ public abstract class ResourceTest extends BaseTest {
 
         new CacheFacade().purge();
 
-        // Enable HTTP and HTTPS over HTTP/1.1 and HTTP/2
         appServer = StandaloneEntry.getAppServer();
         appServer.setHTTPEnabled(true);
-        appServer.setHTTPPort(HTTP_PORT);
-        appServer.setInsecureHTTP2Enabled(true);
+        appServer.setHTTPPort(httpPort);
 
         appServer.setHTTPSEnabled(true);
-        appServer.setHTTPSPort(HTTPS_PORT);
+        appServer.setHTTPSPort(httpsPort);
         appServer.setHTTPSKeyStoreType("JKS");
         appServer.setHTTPSKeyStorePath(
-                TestUtil.getFixture("keystore.jks").toString());
+                TestUtil.getFixture("keystore-password.jks").toString());
         appServer.setHTTPSKeyStorePassword("password");
         appServer.setHTTPSKeyPassword("password");
-        appServer.setSecureHTTP2Enabled(SystemUtils.isALPNAvailable());
 
         appServer.start();
     }
 
     @Override
-    @After
+    @AfterEach
     public void tearDown() throws Exception {
         super.tearDown();
         appServer.stop();
@@ -88,18 +84,32 @@ public abstract class ResourceTest extends BaseTest {
 
     abstract protected String getEndpointPath();
 
+    protected int getHTTPPort() {
+        return httpPort;
+    }
+
     /**
      * @param path URI path relative to {@link #getEndpointPath()}.
-     * @return HTTP URI. Subclasses should override if they need an HTTPS URI.
      */
     protected URI getHTTPURI(String path) {
         try {
-            return new URI("http://localhost:" + appServer.getHTTPPort() +
-                    getEndpointPath() + path);
+            return new URI(getHTTPURIString(path));
         } catch (URISyntaxException e) {
             fail(e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * @param path URI path relative to {@link #getEndpointPath()}.
+     */
+    protected String getHTTPURIString(String path) {
+        return "http://localhost:" + appServer.getHTTPPort() +
+                getEndpointPath() + path;
+    }
+
+    protected int getHTTPSPort() {
+        return httpsPort;
     }
 
     /**

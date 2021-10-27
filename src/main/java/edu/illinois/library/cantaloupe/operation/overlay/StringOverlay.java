@@ -5,29 +5,18 @@ import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.Color;
 import edu.illinois.library.cantaloupe.operation.Operation;
 import edu.illinois.library.cantaloupe.util.StringUtils;
-import org.apache.commons.codec.binary.Hex;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.awt.Font;
 import java.awt.font.TextAttribute;
-import java.nio.charset.Charset;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
 /**
  * <p>Encapsulates a string overlay applied to an image.</p>
  *
  * <p>Instances should be obtained from the
- * {@link OverlayService}.</p>
+ * {@link OverlayFactory}.</p>
  */
 public class StringOverlay extends Overlay implements Operation {
-
-    private static final Logger LOGGER = LoggerFactory.
-            getLogger(StringOverlay.class);
 
     private Color backgroundColor;
     private Color color;
@@ -36,6 +25,7 @@ public class StringOverlay extends Overlay implements Operation {
     private String string;
     private Color strokeColor;
     private float strokeWidth;
+    private boolean wordWrap;
 
     public StringOverlay(String string,
                          Position position,
@@ -45,7 +35,8 @@ public class StringOverlay extends Overlay implements Operation {
                          Color color,
                          Color backgroundColor,
                          Color strokeColor,
-                         float strokeWidth) {
+                         float strokeWidth,
+                         boolean wordWrap) {
         super(position, inset);
         this.setString(string);
         this.setFont(font);
@@ -54,6 +45,7 @@ public class StringOverlay extends Overlay implements Operation {
         this.setMinSize(minSize);
         this.setStrokeColor(strokeColor);
         this.setStrokeWidth(strokeWidth);
+        this.setWordWrap(wordWrap);
     }
 
     public Color getBackgroundColor() {
@@ -90,6 +82,10 @@ public class StringOverlay extends Overlay implements Operation {
     @Override
     public boolean hasEffect() {
         return (getString() != null && getString().length() > 0);
+    }
+
+    public boolean isWordWrap() {
+        return wordWrap;
     }
 
     /**
@@ -156,6 +152,15 @@ public class StringOverlay extends Overlay implements Operation {
     }
 
     /**
+     * @param wordWrap Whether to auto-wrap text.
+     * @throws IllegalStateException If the instance is frozen.
+     */
+    public void setWordWrap(boolean wordWrap) {
+        checkFrozen();
+        this.wordWrap = wordWrap;
+    }
+
+    /**
      * @param fullSize Full size of the source image on which the operation
      *                 is being applied.
      * @return Map with {@literal background_color}, {@literal class},
@@ -167,22 +172,28 @@ public class StringOverlay extends Overlay implements Operation {
     @Override
     public Map<String, Object> toMap(Dimension fullSize,
                                      ScaleConstraint scaleConstraint) {
-        final HashMap<String,Object> map = new HashMap<>();
-        map.put("background_color", getBackgroundColor().toRGBAHex());
-        map.put("class", getClass().getSimpleName());
-        map.put("color", getColor().toRGBAHex());
-        map.put("font", getFont().getName());
-        map.put("font_size", getFont().getSize());
-        map.put("font_weight",
-                getFont().getAttributes().get(TextAttribute.WEIGHT));
-        map.put("glyph_spacing",
-                getFont().getAttributes().get(TextAttribute.TRACKING));
-        map.put("inset", getInset());
-        map.put("position", getPosition().toString());
-        map.put("string", getString());
-        map.put("stroke_color", getStrokeColor().toRGBAHex());
-        map.put("stroke_width", getStrokeWidth());
-        return Collections.unmodifiableMap(map);
+        Float fontWeight = TextAttribute.WEIGHT_REGULAR;
+        if (getFont().getAttributes().get(TextAttribute.WEIGHT) != null) {
+            fontWeight = (Float)getFont().getAttributes().get(TextAttribute.WEIGHT);
+        }
+        Float tracking = 0.0f;
+        if (getFont().getAttributes().get(TextAttribute.TRACKING) != null) {
+            tracking = (Float)getFont().getAttributes().get(TextAttribute.TRACKING);
+        }
+        return Map.ofEntries(
+                Map.entry("background_color", getBackgroundColor().toRGBAHex()),
+                Map.entry("class", getClass().getSimpleName()),
+                Map.entry("color", getColor().toRGBAHex()),
+                Map.entry("font", getFont().getName()),
+                Map.entry("font_size", getFont().getSize()),
+                Map.entry("font_weight", fontWeight),
+                Map.entry("glyph_spacing", tracking),
+                Map.entry("inset", getInset()),
+                Map.entry("position", getPosition().toString()),
+                Map.entry("string", getString()),
+                Map.entry("stroke_color", getStrokeColor().toRGBAHex()),
+                Map.entry("stroke_width", getStrokeWidth()),
+                Map.entry("word_wrap", isWordWrap()));
     }
 
     /**
@@ -193,7 +204,7 @@ public class StringOverlay extends Overlay implements Operation {
     public String toString() {
         // minSize is not included, as it is more of a potential property than
         // a property.
-        return String.format("%s_%s_%d_%s_%d_%.1f_%.01f_%s_%s_%s_%.1f",
+        return String.format("%s_%s_%d_%s_%d_%.1f_%.01f_%s_%s_%s_%.1f_%s",
                 StringUtils.md5(getString()),
                 getPosition(),
                 getInset(),
@@ -204,7 +215,8 @@ public class StringOverlay extends Overlay implements Operation {
                 getColor().toRGBAHex(),
                 getBackgroundColor().toRGBAHex(),
                 getStrokeColor().toRGBAHex(),
-                getStrokeWidth());
+                getStrokeWidth(),
+                isWordWrap());
     }
 
 }

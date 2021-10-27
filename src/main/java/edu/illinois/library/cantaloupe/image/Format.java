@@ -1,241 +1,75 @@
 package edu.illinois.library.cantaloupe.image;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import edu.illinois.library.cantaloupe.source.Source;
 
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Enum representing all source and derivative formats recognized by the
- * application, including all that any processor supports.
+ * <p>Image/file format.</p>
+ *
+ * <p>Instances are immutable.</p>
+ *
+ * @see FormatRegistry
  */
-public enum Format {
-
-    // N.B.: For each one of these, there should be a corresponding file with
-    // a name of the lowercased enum value present in the test resources
-    // directory.
+public final class Format implements Comparable<Format> {
 
     /**
-     * AVI video format.
+     * Represents an unknown format.
      */
-    AVI("AVI",
-            ImageType.RASTER,
-            Arrays.asList("video/avi", "video/msvideo", "video/x-msvideo"),
-            Arrays.asList("avi"),
-            Type.VIDEO,
-            8,
-            false),
-
-    /**
-     * Windows Bitmap image format.
-     */
-    BMP("BMP",
-            ImageType.RASTER,
-            Arrays.asList("image/bmp", "image/x-bmp", "image/x-ms-bmp"),
-            Arrays.asList("bmp", "dib"),
-            Type.IMAGE,
-            8,
-            true),
-
-    /**
-     * DICOM image format.
-     */
-    DCM("DICOM",
-            ImageType.RASTER,
-            Arrays.asList("application/dicom"),
-            Arrays.asList("dcm", "dic"),
-            Type.IMAGE,
-            16,
-            false),
-
-    /**
-     * Flash Video format.
-     */
-    FLV("FLV",
-            ImageType.RASTER,
-            Arrays.asList("video/x-flv"),
-            Arrays.asList("flv", "f4v"),
-            Type.VIDEO,
-            8,
-            false),
-
-    /**
-     * CompuServe GIF image format.
-     */
-    GIF("GIF",
-            ImageType.RASTER,
-            Arrays.asList("image/gif"),
-            Arrays.asList("gif"),
-            Type.IMAGE,
-            3,
-            true),
-
-    /**
-     * JPEG2000 image format.
-     */
-    JP2("JPEG2000",
-            ImageType.RASTER,
-            Arrays.asList("image/jp2"),
-            Arrays.asList("jp2", "j2k", "jpx", "jpf"),
-            Type.IMAGE,
-            16,
-            true),
-
-    /**
-     * JPEG JFIF image format.
-     */
-    JPG("JPEG",
-            ImageType.RASTER,
-            Arrays.asList("image/jpeg"),
-            Arrays.asList("jpg", "jpeg"),
-            Type.IMAGE,
-            8,
-            false),
-
-    /**
-     * Apple QuickTime video format.
-     */
-    MOV("QuickTime",
-            ImageType.RASTER,
-            Arrays.asList("video/quicktime", "video/x-quicktime"),
-            Arrays.asList("mov", "qt"),
-            Type.VIDEO,
-            8,
-            false),
-
-    /**
-     * MPEG-4 video format.
-     */
-    MP4("MPEG-4",
-            ImageType.RASTER,
-            Arrays.asList("video/mp4"),
-            Arrays.asList("mp4", "m4v"),
-            Type.VIDEO,
-            8,
-            false),
-
-    /**
-     * MPEG-1 video format.
-     */
-    MPG("MPEG",
-            ImageType.RASTER,
-            Arrays.asList("video/mpeg"),
-            Arrays.asList("mpg"),
-            Type.VIDEO,
-            8,
-            false),
-
-    /**
-     * Portable Document Format.
-     */
-    PDF("PDF",
-            ImageType.VECTOR,
-            Arrays.asList("application/pdf"),
-            Arrays.asList("pdf"),
-            Type.IMAGE,
-            16,
-            false),
-
-    /**
-     * Portable Network Graphics image format.
-     */
-    PNG("PNG",
-            ImageType.RASTER,
-            Arrays.asList("image/png"),
-            Arrays.asList("png"),
-            Type.IMAGE,
-            16,
-            true),
-
-    /**
-     * Tagged Image File Format.
-     */
-    TIF("TIFF",
-            ImageType.RASTER,
-            Arrays.asList("image/tiff"),
-            Arrays.asList("tif", "ptif", "tiff"),
-            Type.IMAGE,
-            16,
-            true),
-
-    RAFT("RAFT",
-            ImageType.RASTER,
-            Arrays.asList("image/raft"),
-            Arrays.asList("raft", "fp"),
-            Type.IMAGE,
-            16,
-            false),
-
-    CANTALOUPE("CANTALOUPE",
-            ImageType.RASTER,
-            Arrays.asList("image/cantaloupe"),
-            Arrays.asList("cantaloupe"),
-            Type.IMAGE,
-            16,
-            false),
-
-    /**
-     * WebM video format.
-     */
-    WEBM("WebM",
-            ImageType.RASTER,
-            Arrays.asList("video/webm"),
-            Arrays.asList("webm"),
-            Type.VIDEO,
-            8,
-            false),
-
-    /**
-     * WebP image format.
-     */
-    WEBP("WebP",
-            ImageType.RASTER,
-            Arrays.asList("image/webp"),
-            Arrays.asList("webp"),
-            Type.IMAGE,
-            8,
-            true),
-
-    /**
-     * Unknown format.
-     */
-    UNKNOWN("Unknown",
-            ImageType.UNKNOWN,
-            Arrays.asList("unknown/unknown"),
-            Arrays.asList("unknown"),
-            Type.UNKNOWN,
-            0,
+    public static final Format UNKNOWN = new Format(
+            "unknown",
+            "Unknown",
+            List.of("unknown/unknown"),
+            List.of("unknown"),
+            true,
+            false,
             false);
 
-    public enum ImageType {
-        RASTER, UNKNOWN, VECTOR
-    }
-
-    public enum Type {
-        IMAGE, UNKNOWN, VIDEO
-    }
-
+    @JsonProperty
     private List<String> extensions;
-    private ImageType imageType;
+    @JsonProperty
     private List<String> mediaTypes;
+    @JsonProperty
+    private String key;
+    @JsonProperty
     private String name;
-    private int maxSampleSize;
+    @JsonProperty("raster")
+    private boolean isRaster;
+    @JsonProperty("video")
+    private boolean isVideo;
+    @JsonProperty
     private boolean supportsTransparency;
-    private Type type;
+
+    /**
+     * @return All known formats.
+     */
+    public static Set<Format> all() {
+        return FormatRegistry.allFormats();
+    }
+
+    /**
+     * @param key One of the keys in {@literal formats.yml}.
+     * @return    Instance corresponding to the given argument, or {@code null}
+     *            if no such format exists.
+     */
+    public static Format get(String key) {
+        return FormatRegistry.formatWithKey(key);
+    }
 
     /**
      * <p>Attempts to infer a format from the given identifier.</p>
      *
      * <p>It is usually more reliable (but also maybe more expensive) to
-     * obtain this information from {@link Source#getFormat()}.</p>
+     * obtain this information from {@link Source#getFormatIterator()}.</p>
      *
      * @param identifier
      * @return The source format corresponding to the given identifier,
      *         assuming that its value will have a recognizable filename
-     *         extension. If not, {@link #UNKNOWN} will be returned.
+     *         extension. If not, {@link #UNKNOWN} is returned.
      */
     public static Format inferFormat(Identifier identifier) {
         return inferFormat(identifier.toString());
@@ -245,12 +79,12 @@ public enum Format {
      * <p>Attempts to infer a format from the given pathname.</p>
      *
      * <p>It is usually more reliable (but also maybe more expensive) to
-     * obtain this information from {@link Source#getFormat()}.</p>
+     * obtain this information from {@link Source#getFormatIterator()}.</p>
      *
      * @param pathname
      * @return The source format corresponding to the given identifier,
      *         assuming that its value will have a recognizable filename
-     *         extension. If not, {@link #UNKNOWN} will be returned.
+     *         extension. If not, {@link #UNKNOWN} is returned.
      */
     public static Format inferFormat(String pathname) {
         String extension = null;
@@ -260,29 +94,75 @@ public enum Format {
         }
         if (extension != null) {
             extension = extension.toLowerCase();
-            for (Format enumValue : Format.values()) {
-                if (enumValue.getExtensions().contains(extension)) {
-                    return enumValue;
+            for (Format format : Format.all()) {
+                if (format.getExtensions().contains(extension)) {
+                    return format;
                 }
             }
         }
         return Format.UNKNOWN;
     }
 
-    Format(final String name,
-           final ImageType imageType,
-           final List<String> mediaTypes,
-           final List<String> extensions,
-           final Type type,
-           final int maxSampleSize,
-           final boolean supportsTransparency) {
-        this.imageType = imageType;
-        this.mediaTypes = mediaTypes;
-        this.extensions = extensions;
-        this.name = name;
-        this.type = type;
-        this.maxSampleSize = maxSampleSize;
+    /**
+     * @return Format in the {@link FormatRegistry registry} with the given
+     *         extension.
+     */
+    public static Format withExtension(String extension) {
+        if (extension.startsWith(".")) {
+            extension = extension.substring(1);
+        }
+        final String lcext = extension.toLowerCase();
+        return all()
+                .stream()
+                .filter(f -> f.getExtensions().contains(lcext))
+                .findAny()
+                .orElse(null);
+    }
+
+    /**
+     * No-op constructor needed by Jackson.
+     */
+    Format() {}
+
+    Format(String key,
+           String name,
+           List<String> mediaTypes,
+           List<String> extensions,
+           boolean isRaster,
+           boolean isVideo,
+           boolean supportsTransparency) {
+        this();
+        this.key                  = key;
+        this.name                 = name;
+        this.mediaTypes           = mediaTypes;
+        this.extensions           = extensions;
+        this.isRaster             = isRaster;
+        this.isVideo              = isVideo;
         this.supportsTransparency = supportsTransparency;
+    }
+
+    /**
+     * Compares by case-insensitive {@link #getName() name}.
+     */
+    @Override
+    public int compareTo(Format o) {
+        return getName().compareToIgnoreCase(o.getName());
+    }
+
+    /**
+     * @param obj Object to compare.
+     * @return    Whether the given object's {@link #getKey() key} is equal to
+     *            that of the instance.
+     */
+    @Override
+    public boolean equals(Object obj) {
+        if (obj == this) {
+            return true;
+        } else if (obj instanceof Format) {
+            Format other = (Format) obj;
+            return other.key.equals(key);
+        }
+        return super.equals(obj);
     }
 
     /**
@@ -293,19 +173,13 @@ public enum Format {
         return extensions;
     }
 
-    public ImageType getImageType() {
-        return imageType;
-    }
-
     /**
-     * N.B. This is not to be taken too seriously. As of the time it was
-     * written, its only purpose is to query formats' support for
-     * greater-than-8-bit samples.
-     *
-     * @return Maximum sample size supported by the format.
+     * @return Unique format key, used internally to identify formats but not
+     *         relevant outside of the application.
+     * @see #getName()
      */
-    public int getMaxSampleSize() {
-        return maxSampleSize;
+    public String getKey() {
+        return key;
     }
 
     /**
@@ -314,14 +188,15 @@ public enum Format {
      */
     public List<MediaType> getMediaTypes() {
         return mediaTypes.stream().map(MediaType::new).
-                collect(Collectors.toList());
+                collect(Collectors.toUnmodifiableList());
     }
 
     /**
      * @return Human-readable name.
+     * @see #getKey()
      */
     public String getName() {
-        return this.name;
+        return name;
     }
 
     /**
@@ -338,28 +213,17 @@ public enum Format {
         return getMediaTypes().get(0);
     }
 
-    public Type getType() {
-        return type;
+    @Override
+    public int hashCode() {
+        return key.hashCode();
     }
 
-    /**
-     * Convenience method.
-     *
-     * @return True if the type (as returned by {@link #getType()}) is
-     * {@link Format.Type#IMAGE}.
-     */
-    public boolean isImage() {
-        return (this.getType() != null && this.getType().equals(Type.IMAGE));
+    public boolean isRaster() {
+        return isRaster;
     }
 
-    /**
-     * Convenience method.
-     *
-     * @return True if the type (as returned by {@link #getType()}) is
-     * {@link Format.Type#VIDEO}.
-     */
     public boolean isVideo() {
-        return (this.getType() != null && this.getType().equals(Type.VIDEO));
+        return isVideo;
     }
 
     public boolean supportsTransparency() {
@@ -367,21 +231,21 @@ public enum Format {
     }
 
     /**
-     * @return Map serialization with <code>extension</code> and
-     * <code>media_type</code> keys corresponding to string values.
+     * @return Unmodifiable map with {@code extension} and {@code media_type}
+     *         keys corresponding to string values.
      */
     public Map<String,Object> toMap() {
-        Map<String,Object> map = new HashMap<>();
-        map.put("extension", getPreferredExtension());
-        map.put("media_type", getPreferredMediaType().toString());
-        return map;
+        return Map.of(
+                "extension", getPreferredExtension(),
+                "media_type", getPreferredMediaType().toString());
     }
 
     /**
      * @return Preferred extension.
      */
+    @Override
     public String toString() {
-        return this.getPreferredExtension();
+        return getPreferredExtension();
     }
 
 }

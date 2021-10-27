@@ -2,6 +2,8 @@ package edu.illinois.library.cantaloupe.resource.iiif.v2;
 
 import edu.illinois.library.cantaloupe.image.Dimension;
 import edu.illinois.library.cantaloupe.operation.Scale;
+import edu.illinois.library.cantaloupe.operation.ScaleByPercent;
+import edu.illinois.library.cantaloupe.operation.ScaleByPixels;
 import edu.illinois.library.cantaloupe.resource.IllegalClientArgumentException;
 import edu.illinois.library.cantaloupe.util.StringUtils;
 
@@ -18,38 +20,32 @@ class Size {
         /**
          * Represents a size argument in {@literal ,h} format.
          */
-        ASPECT_FIT_HEIGHT(Scale.Mode.ASPECT_FIT_HEIGHT),
+        ASPECT_FIT_HEIGHT,
 
         /**
          * Represents a size argument in {@literal w,} format.
          */
-        ASPECT_FIT_WIDTH(Scale.Mode.ASPECT_FIT_WIDTH),
+        ASPECT_FIT_WIDTH,
 
         /**
          * Represents a size argument in {@literal !w,h} format.
          */
-        ASPECT_FIT_INSIDE(Scale.Mode.ASPECT_FIT_INSIDE),
+        ASPECT_FIT_INSIDE,
 
         /**
-         * Represents a {@literal full} (Image API 2.0 & 2.1) or {@literal max}
-         * (Image API 2.1) size argument.
+         * Represents a {@literal full} size argument.
          */
-        MAX(Scale.Mode.FULL),
+        FULL,
+
+        /**
+         * Represents a {@literal max} size argument.
+         */
+        MAX,
 
         /**
          * Represents a size argument in {@literal w,h} format.
          */
-        NON_ASPECT_FILL(Scale.Mode.NON_ASPECT_FILL);
-
-        private Scale.Mode equivalentScaleMode;
-
-        ScaleMode(Scale.Mode equivalentScaleMode) {
-            this.equivalentScaleMode = equivalentScaleMode;
-        }
-
-        public edu.illinois.library.cantaloupe.operation.Scale.Mode toMode() {
-            return this.equivalentScaleMode;
-        }
+        NON_ASPECT_FILL
 
     }
 
@@ -66,7 +62,9 @@ class Size {
     public static Size fromUri(String uriSize) {
         Size size = new Size();
         try {
-            if (uriSize.equals("max") || uriSize.equals("full")) {
+            if (uriSize.equals("full")) {
+                size.setScaleMode(ScaleMode.FULL);
+            } else if (uriSize.equals("max")) {
                 size.setScaleMode(ScaleMode.MAX);
             } else {
                 if (uriSize.endsWith(",")) {
@@ -126,7 +124,7 @@ class Size {
         return percent;
     }
 
-    public ScaleMode getScaleMode() {
+    ScaleMode getScaleMode() {
         return scaleMode;
     }
 
@@ -158,7 +156,7 @@ class Size {
         this.percent = percent;
     }
 
-    public void setScaleMode(ScaleMode scaleMode) {
+    void setScaleMode(ScaleMode scaleMode) {
         this.scaleMode = scaleMode;
     }
 
@@ -170,21 +168,31 @@ class Size {
         this.width = width;
     }
 
-    public Scale toScale() {
-        Scale scale = new Scale();
-        if (getHeight() != null) {
-            scale.setHeight(getHeight());
-        }
-        if (getWidth() != null) {
-            scale.setWidth(getWidth());
-        }
+    Scale toScale() {
         if (getPercent() != null) {
-            scale.setPercent(getPercent() / 100.0);
+            return new ScaleByPercent(getPercent() / 100.0);
         }
-        if (getScaleMode() != null) {
-            scale.setMode(getScaleMode().toMode());
+        switch (getScaleMode()) {
+            case FULL:
+                return new ScaleByPercent();
+            case MAX:
+                return new ScaleByPercent();
+            case ASPECT_FIT_WIDTH:
+                return new ScaleByPixels(
+                        getWidth(), null, ScaleByPixels.Mode.ASPECT_FIT_WIDTH);
+            case ASPECT_FIT_HEIGHT:
+                return new ScaleByPixels(
+                        null, getHeight(), ScaleByPixels.Mode.ASPECT_FIT_HEIGHT);
+            case ASPECT_FIT_INSIDE:
+                return new ScaleByPixels(
+                        getWidth(), getHeight(), ScaleByPixels.Mode.ASPECT_FIT_INSIDE);
+            case NON_ASPECT_FILL:
+                return new ScaleByPixels(
+                        getWidth(), getHeight(), ScaleByPixels.Mode.NON_ASPECT_FILL);
+            default:
+                throw new IllegalArgumentException(
+                        "Unknown scale mode. This is probably a bug.");
         }
-        return scale;
     }
 
     /**
@@ -194,9 +202,10 @@ class Size {
     @Override
     public String toString() {
         String str = "";
-        if (ScaleMode.MAX.equals(getScaleMode())) {
-            // Use "full" because "max" is not available in Image API 2.0.
+        if (ScaleMode.FULL.equals(getScaleMode())) {
             str += "full";
+        } else if (ScaleMode.MAX.equals(getScaleMode())) {
+            str += "max";
         } else if (getPercent() != null) {
             str += "pct:" + StringUtils.removeTrailingZeroes(getPercent());
         } else {
@@ -221,7 +230,8 @@ class Size {
      * @see            #toString()
      */
     String toCanonicalString(Dimension fullSize) {
-        if (ScaleMode.MAX.equals(getScaleMode())) {
+        if (ScaleMode.FULL.equals(getScaleMode()) ||
+                ScaleMode.MAX.equals(getScaleMode())) {
             return toString();
         } else if (ScaleMode.NON_ASPECT_FILL.equals(getScaleMode())) { // w,h syntax
             return getWidth() + "," + getHeight();

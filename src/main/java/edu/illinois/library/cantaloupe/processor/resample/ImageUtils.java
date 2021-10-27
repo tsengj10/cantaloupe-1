@@ -8,6 +8,7 @@ package edu.illinois.library.cantaloupe.processor.resample;
 
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBuffer;
 import java.awt.image.Raster;
 import java.awt.image.WritableRaster;
 
@@ -18,36 +19,6 @@ import java.awt.image.WritableRaster;
  */
 class ImageUtils {
 
-    static public int numberOfChannels(BufferedImage img) {
-        switch (img.getType()) {
-            case BufferedImage.TYPE_3BYTE_BGR:
-                return 3;
-            case BufferedImage.TYPE_4BYTE_ABGR:
-                return 4;
-            case BufferedImage.TYPE_BYTE_GRAY:
-                return 1;
-            case BufferedImage.TYPE_INT_BGR:
-                return 3;
-            case BufferedImage.TYPE_INT_ARGB:
-                return 4;
-            case BufferedImage.TYPE_INT_RGB:
-                return 3;
-            case BufferedImage.TYPE_CUSTOM:
-                return 4;
-            case BufferedImage.TYPE_4BYTE_ABGR_PRE:
-                return 4;
-            case BufferedImage.TYPE_INT_ARGB_PRE:
-                return 4;
-            case BufferedImage.TYPE_USHORT_555_RGB:
-                return 3;
-            case BufferedImage.TYPE_USHORT_565_RGB:
-                return 3;
-            case BufferedImage.TYPE_USHORT_GRAY:
-                return 1;
-        }
-        return 0;
-    }
-
     /**
      * Returns one row (height == 1) of byte packed image data in BGR or AGBR
      * form.
@@ -55,18 +26,19 @@ class ImageUtils {
      * @param img
      * @param y
      * @param w
-     * @param array Array into which the pixels will be read.
-     * @param temp  must be either null or a array with length of width * height.
+     * @param outArray Array into which the pixels will be read.
+     * @param temp     Must be either null or a array with length of
+     *                 {@code width * height}.
      */
-    public static void readPixelsBGR(BufferedImage img,
-                                     int y,
-                                     int w,
-                                     byte[] array,
-                                     int[] temp) {
-        final int x = 0;
-        final int h = 1;
+    static void readPixelsBGR(BufferedImage img,
+                              int y,
+                              int w,
+                              byte[] outArray,
+                              int[] temp) {
+        final int x = 0, h = 1;
 
-        assert array.length == temp.length * numberOfChannels(img);
+        final int numBands = img.getSampleModel().getNumBands();
+        assert outArray.length == temp.length * numBands;
         assert (temp.length == w);
 
         int imageType = img.getType();
@@ -77,32 +49,46 @@ class ImageUtils {
             case BufferedImage.TYPE_4BYTE_ABGR_PRE:
             case BufferedImage.TYPE_BYTE_GRAY:
                 raster = img.getRaster();
-                //int ttype= raster.getTransferType();
-                raster.getDataElements(x, y, w, h, array);
+                raster.getDataElements(x, y, w, h, outArray);
                 break;
             case BufferedImage.TYPE_INT_BGR:
                 raster = img.getRaster();
                 raster.getDataElements(x, y, w, h, temp);
-                ints2bytes(temp, array, 0, 1, 2);  // bgr -->  bgr
+                ints2bytes(temp, outArray, 0, 1, 2);  // bgr -->  bgr
                 break;
             case BufferedImage.TYPE_INT_RGB:
                 raster = img.getRaster();
                 raster.getDataElements(x, y, w, h, temp);
-                ints2bytes(temp, array, 2, 1, 0);  // rgb -->  bgr
+                ints2bytes(temp, outArray, 2, 1, 0);  // rgb -->  bgr
                 break;
             case BufferedImage.TYPE_INT_ARGB:
             case BufferedImage.TYPE_INT_ARGB_PRE:
                 raster = img.getRaster();
                 raster.getDataElements(x, y, w, h, temp);
-                ints2bytes(temp, array, 2, 1, 0, 3);  // argb -->  abgr
+                ints2bytes(temp, outArray, 2, 1, 0, 3);  // argb -->  abgr
                 break;
-            case BufferedImage.TYPE_CUSTOM: // TODO: works for my icon image loader, but else ???
-                img.getRGB(x, y, w, h, temp, 0, w);
-                ints2bytes(temp, array, 2, 1, 0, 3);  // argb -->  abgr
+            case BufferedImage.TYPE_CUSTOM:
+                raster = img.getRaster();
+                switch (raster.getTransferType()) {
+                    case DataBuffer.TYPE_USHORT:
+                    case DataBuffer.TYPE_SHORT:
+                    case DataBuffer.TYPE_INT:
+                        raster.getDataElements(x, y, w, h, temp);
+                        ints2bytes(temp, outArray, 2, 1, 0, 3);  // argb -->  abgr
+                        break;
+                    case DataBuffer.TYPE_BYTE:
+                        raster.getDataElements(x, y, w, h, outArray);
+                        break;
+                    default:
+                        throw new IllegalArgumentException("Incompatible raster type");
+                }
                 break;
             default:
+                // Hopefully we never get here; pixels obtained from
+                // BufferedImage.getRGB() have gamma applied, but we want to
+                // remain in linear space.
                 img.getRGB(x, y, w, h, temp, 0, w);
-                ints2bytes(temp, array, 2, 1, 0);  // rgb -->  bgr
+                ints2bytes(temp, outArray, 2, 1, 0);  // rgb -->  bgr
                 break;
         }
     }
@@ -116,16 +102,16 @@ class ImageUtils {
      * <p>Does not unmange the image for all (A)RGN and (A)BGR and gray
      * images.</p>
      */
-    public static void setBGRPixels(byte[] bgrPixels,
-                                    BufferedImage image,
-                                    int x, int y, int w, int h) {
+    static void setBGRPixels(byte[] bgrPixels,
+                             BufferedImage image,
+                             int x, int y, int w, int h) {
         int imageType = image.getType();
         WritableRaster raster = image.getRaster();
-        //int ttype= raster.getTransferType();
         if (imageType == BufferedImage.TYPE_3BYTE_BGR ||
                 imageType == BufferedImage.TYPE_4BYTE_ABGR ||
                 imageType == BufferedImage.TYPE_4BYTE_ABGR_PRE ||
-                imageType == BufferedImage.TYPE_BYTE_GRAY) {
+                imageType == BufferedImage.TYPE_BYTE_GRAY ||
+                imageType == BufferedImage.TYPE_CUSTOM) {
             raster.setDataElements(x, y, w, h, bgrPixels);
         } else {
             int[] pixels;

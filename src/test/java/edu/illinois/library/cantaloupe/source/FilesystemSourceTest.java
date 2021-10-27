@@ -1,26 +1,24 @@
 package edu.illinois.library.cantaloupe.source;
 
-import static org.junit.Assert.*;
-import static org.junit.Assume.assumeTrue;
-
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.image.Identifier;
-import edu.illinois.library.cantaloupe.resource.RequestContext;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.DelegateProxyService;
+import edu.illinois.library.cantaloupe.delegate.DelegateProxy;
 import edu.illinois.library.cantaloupe.test.TestUtil;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.NoSuchElementException;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.*;
 
 public class FilesystemSourceTest extends AbstractSourceTest {
 
@@ -29,7 +27,7 @@ public class FilesystemSourceTest extends AbstractSourceTest {
 
     private FilesystemSource instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         instance = newInstance();
@@ -54,127 +52,134 @@ public class FilesystemSourceTest extends AbstractSourceTest {
 
     @Override
     void useBasicLookupStrategy() {
-        try {
-            Configuration config = Configuration.getInstance();
-            config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-            config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                    TestUtil.getFixture("delegates.rb").toString());
-            config.setProperty(Key.FILESYSTEMSOURCE_LOOKUP_STRATEGY,
-                    "BasicLookupStrategy");
-            config.setProperty(Key.FILESYSTEMSOURCE_PATH_PREFIX,
-                    TestUtil.getFixturePath() + "/images" + File.separator);
-        } catch (IOException e) {
-            fail();
-        }
+        Configuration config = Configuration.getInstance();
+        config.setProperty(Key.FILESYSTEMSOURCE_LOOKUP_STRATEGY,
+                "BasicLookupStrategy");
+        config.setProperty(Key.FILESYSTEMSOURCE_PATH_PREFIX,
+                TestUtil.getFixturePath() + "/images" + File.separator);
     }
 
     @Override
     void useScriptLookupStrategy() {
-        try {
-            Configuration config = Configuration.getInstance();
-            config.setProperty(Key.FILESYSTEMSOURCE_LOOKUP_STRATEGY,
-                    "ScriptLookupStrategy");
-            config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
-            config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
-                    TestUtil.getFixture("delegates.rb").toString());
-        } catch (IOException e) {
-            fail();
-        }
+        Configuration config = Configuration.getInstance();
+        config.setProperty(Key.DELEGATE_SCRIPT_ENABLED, true);
+        config.setProperty(Key.DELEGATE_SCRIPT_PATHNAME,
+                TestUtil.getFixture("delegates.rb").toString());
+        config.setProperty(Key.FILESYSTEMSOURCE_LOOKUP_STRATEGY,
+                "ScriptLookupStrategy");
     }
 
     /* checkAccess() */
 
-    @Test(expected = AccessDeniedException.class)
-    public void testCheckAccessUsingBasicLookupStrategyWithPresentUnreadableFile()
+    @Test
+    void testCheckAccessUsingBasicLookupStrategyWithPresentUnreadableFile()
             throws Exception {
-        Path path = instance.getPath();
+        Path path = instance.getFile();
         try {
             assumeTrue(path.toFile().setReadable(false));
-            instance.checkAccess();
+            assertThrows(AccessDeniedException.class, instance::checkAccess);
         } finally {
             path.toFile().setReadable(true);
         }
     }
 
     @Test
-    public void testCheckAccessUsingScriptLookupStrategyWithPresentReadableFile()
+    void testCheckAccessUsingScriptLookupStrategyWithPresentReadableFile()
             throws Exception {
         useScriptLookupStrategy();
 
         Identifier identifier = new Identifier(
                 TestUtil.getImage(IDENTIFIER.toString()).toString());
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
 
         instance.setIdentifier(identifier);
         instance.checkAccess();
     }
 
-    @Test(expected = AccessDeniedException.class)
-    public void testCheckAccessUsingScriptLookupStrategyWithPresentUnreadableFile()
+    @Test
+    void testCheckAccessUsingScriptLookupStrategyWithPresentUnreadableFile()
             throws Exception {
         useScriptLookupStrategy();
 
         Identifier identifier = new Identifier(
                 TestUtil.getImage(IDENTIFIER.toString()).toString());
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
         instance.setIdentifier(identifier);
 
-        Path path = instance.getPath();
+        Path path = instance.getFile();
         try {
             assumeTrue(path.toFile().setReadable(false));
             Files.setPosixFilePermissions(path, Collections.emptySet());
-            instance.checkAccess();
+            assertThrows(AccessDeniedException.class, instance::checkAccess);
         } finally {
             path.toFile().setReadable(true);
         }
     }
 
-    @Test(expected = NoSuchFileException.class)
-    public void testCheckAccessUsingScriptLookupStrategyWithMissingFile()
-            throws Exception {
+    @Test
+    void testCheckAccessUsingScriptLookupStrategyWithMissingFile() {
         useScriptLookupStrategy();
 
         Identifier identifier = new Identifier("missing");
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(identifier);
         instance.setDelegateProxy(proxy);
-
         instance.setIdentifier(identifier);
-        instance.checkAccess();
+        assertThrows(NoSuchFileException.class, instance::checkAccess);
     }
 
-    /* getPath() */
+    /* getFormatIterator() */
 
     @Test
-    public void testGetPath() throws Exception {
-        assertNotNull(instance.getPath());
+    void testGetFormatIteratorHasNext() {
+        instance.setIdentifier(IDENTIFIER);
+
+        FilesystemSource.FormatIterator<Format> it = instance.getFormatIterator();
+        assertTrue(it.hasNext());
+        it.next(); // object key
+        assertTrue(it.hasNext());
+        it.next(); // identifier extension
+        assertTrue(it.hasNext());
+        it.next(); // magic bytes
+        assertFalse(it.hasNext());
     }
 
     @Test
-    public void testGetPathUsingBasicLookupStrategyWithPrefix()
-            throws Exception {
+    void testGetFormatIteratorNext() {
+        instance.setIdentifier(new Identifier("jpg-incorrect-extension.png"));
+
+        FilesystemSource.FormatIterator<Format> it =
+                instance.getFormatIterator();
+        assertEquals(Format.get("png"), it.next()); // object key
+        assertEquals(Format.get("png"), it.next()); // identifier extension
+        assertEquals(Format.get("jpg"), it.next()); // magic bytes
+        assertThrows(NoSuchElementException.class, it::next);
+    }
+
+    /* getFile() */
+
+    @Test
+    void testGetFile() throws Exception {
+        assertNotNull(instance.getFile());
+    }
+
+    @Test
+    void testgetFileUsingBasicLookupStrategyWithPrefix() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_PREFIX, "/prefix/");
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_SUFFIX, "");
 
         instance.setIdentifier(new Identifier("id"));
         assertEquals(File.separator + "prefix" + File.separator + "id",
-                instance.getPath().toString());
+                instance.getFile().toString());
     }
 
     @Test
-    public void testGetPathUsingBasicLookupStrategyWithSuffix()
-            throws Exception {
+    void testgetFileUsingBasicLookupStrategyWithSuffix() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_PREFIX, "/prefix/");
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_SUFFIX, "/suffix");
@@ -182,18 +187,18 @@ public class FilesystemSourceTest extends AbstractSourceTest {
         instance.setIdentifier(new Identifier("id"));
         assertEquals(
                 File.separator + "prefix" + File.separator + "id" + File.separator + "suffix",
-                instance.getPath().toString());
+                instance.getFile().toString());
     }
 
     @Test
-    public void testGetPathUsingBasicLookupStrategyWithoutPrefixOrSuffix()
+    void testgetFileUsingBasicLookupStrategyWithoutPrefixOrSuffix()
             throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_PREFIX, "");
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_SUFFIX, "");
 
         instance.setIdentifier(new Identifier("id"));
-        assertEquals("id", instance.getPath().toString());
+        assertEquals("id", instance.getFile().toString());
     }
 
     /**
@@ -201,7 +206,7 @@ public class FilesystemSourceTest extends AbstractSourceTest {
      * to disallow ascending up the directory tree.
      */
     @Test
-    public void testGetPathSanitization() throws Exception {
+    void testgetFileSanitization() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_PREFIX, "/prefix/");
         config.setProperty(Key.FILESYSTEMSOURCE_PATH_SUFFIX, "/suffix");
@@ -209,22 +214,22 @@ public class FilesystemSourceTest extends AbstractSourceTest {
         instance.setIdentifier(new Identifier("id/../"));
         assertEquals(
                 File.separator + "prefix" + File.separator + "id" + File.separator + "suffix",
-                instance.getPath().toString());
+                instance.getFile().toString());
 
         instance.setIdentifier(new Identifier("/../id"));
         assertEquals(
                 File.separator + "prefix" + File.separator + "id" + File.separator + "suffix",
-                instance.getPath().toString());
+                instance.getFile().toString());
 
         instance.setIdentifier(new Identifier("id\\..\\"));
         assertEquals(
                 File.separator + "prefix" + File.separator + "id" + File.separator + "suffix",
-                instance.getPath().toString());
+                instance.getFile().toString());
 
         instance.setIdentifier(new Identifier("\\..\\id"));
         assertEquals(
                 File.separator + "prefix" + File.separator + "id" + File.separator + "suffix",
-                instance.getPath().toString());
+                instance.getFile().toString());
 
         // test injection-safety
         instance.setIdentifier(new Identifier("/id/../cats\\..\\dogs/../..\\foxes/.\\...\\/....\\.."));
@@ -232,95 +237,24 @@ public class FilesystemSourceTest extends AbstractSourceTest {
                 File.separator + "prefix" + File.separator + "id" +
                         File.separator + "cats" + File.separator + "dogs" +
                         File.separator + "foxes" + File.separator + "suffix",
-                instance.getPath().toString());
+                instance.getFile().toString());
     }
 
     @Test
-    public void testGetPathWithScriptLookupStrategy() throws Exception {
+    void testgetFileWithScriptLookupStrategy() throws Exception {
         useScriptLookupStrategy();
 
-        RequestContext context = new RequestContext();
-        context.setIdentifier(IDENTIFIER);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
+        DelegateProxy proxy = TestUtil.newDelegateProxy();
+        proxy.getRequestContext().setIdentifier(IDENTIFIER);
         instance.setDelegateProxy(proxy);
 
-        assertEquals(IDENTIFIER.toString(), instance.getPath().toString());
-    }
-
-    /* getFormat() */
-
-    @Test
-    public void testGetFormatWithFilenameExtension() throws Exception {
-        instance.setIdentifier(new Identifier("bmp-rgb-64x56x8.bmp"));
-        assertEquals(Format.BMP, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("gif-rgb-64x56x8.gif"));
-        assertEquals(Format.GIF, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("jp2-5res-rgb-64x56x8-monotiled-lossy.jp2"));
-        assertEquals(Format.JP2, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("jpg-rgb-64x56x8-baseline.jpg"));
-        assertEquals(Format.JPG, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("pdf.pdf"));
-        assertEquals(Format.PDF, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("png-rgb-64x56x8.png"));
-        assertEquals(Format.PNG, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("tif-rgb-1res-64x56x8-striped-jpeg.tif"));
-        assertEquals(Format.TIF, instance.getFormat());
-    }
-
-    @Test
-    public void testGetFormatWithIdentifierExtension() throws Exception {
-        useScriptLookupStrategy();
-
-        Identifier identifier = new Identifier("FilesystemSourceTest-" +
-                "extension-in-identifier-but-not-filename.jpg");
-        RequestContext context = new RequestContext();
-        context.setIdentifier(identifier);
-        DelegateProxyService service = DelegateProxyService.getInstance();
-        DelegateProxy proxy = service.newDelegateProxy(context);
-        instance.setDelegateProxy(proxy);
-        instance.setIdentifier(identifier);
-
-        assertEquals(Format.JPG, instance.getFormat());
-    }
-
-    @Test
-    public void testGetFormatByDetection() throws Exception {
-        instance.setIdentifier(new Identifier("bmp"));
-        assertEquals(Format.BMP, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("gif"));
-        assertEquals(Format.GIF, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("jp2"));
-        assertEquals(Format.JP2, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("jpg"));
-        assertEquals(Format.JPG, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("pdf"));
-        assertEquals(Format.PDF, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("png"));
-        assertEquals(Format.PNG, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("tif"));
-        assertEquals(Format.TIF, instance.getFormat());
-
-        instance.setIdentifier(new Identifier("txt"));
-        assertEquals(Format.UNKNOWN, instance.getFormat());
+        assertEquals(IDENTIFIER.toString(), instance.getFile().toString());
     }
 
     /* newStreamFactory() */
 
     @Test
-    public void testNewStreamFactoryWithPresentReadableFile() throws Exception {
+    void testNewStreamFactoryWithPresentReadableFile() throws Exception {
         assertNotNull(instance.newStreamFactory());
     }
 

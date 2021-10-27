@@ -3,8 +3,6 @@ package edu.illinois.library.cantaloupe.status;
 import edu.illinois.library.cantaloupe.Application;
 import edu.illinois.library.cantaloupe.cache.InfoCache;
 import edu.illinois.library.cantaloupe.cache.InfoService;
-import edu.illinois.library.cantaloupe.script.DelegateProxy;
-import edu.illinois.library.cantaloupe.script.InvocationCache;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
@@ -19,22 +17,6 @@ public final class ApplicationStatus {
 
     public String getApplicationVersion() {
         return Application.getVersion();
-    }
-
-    /**
-     * @return Max delegate method invocation cache size.
-     */
-    public long getDMICMaxSize() {
-        InvocationCache cache = DelegateProxy.getInvocationCache();
-        return cache.maxSize();
-    }
-
-    /**
-     * @return Current delegate method invocation cache size.
-     */
-    public long getDMICSize() {
-        InvocationCache cache = DelegateProxy.getInvocationCache();
-        return cache.size();
     }
 
     /**
@@ -54,6 +36,14 @@ public final class ApplicationStatus {
     }
 
     /**
+     * @return Number of available processor cores.
+     */
+    public int getNumProcessors() {
+        Runtime runtime = Runtime.getRuntime();
+        return runtime.availableProcessors();
+    }
+
+    /**
      * @return Free VM heap in bytes.
      */
     public long getVMFreeHeap() {
@@ -62,11 +52,25 @@ public final class ApplicationStatus {
     }
 
     /**
+     * @return JVM info.
+     */
+    public String getVMInfo() {
+        return System.getProperty("java.vm.info");
+    }
+
+    /**
      * @return Max VM heap in bytes.
      */
     public long getVMMaxHeap() {
         Runtime runtime = Runtime.getRuntime();
         return runtime.maxMemory();
+    }
+
+    /**
+     * @return JVM name.
+     */
+    public String getVMName() {
+        return System.getProperty("java.vm.name");
     }
 
     /**
@@ -93,36 +97,49 @@ public final class ApplicationStatus {
         return runtime.totalMemory() - runtime.freeMemory();
     }
 
+    /**
+     * @return JVM vendor.
+     */
+    public String getVMVendor() {
+        return System.getProperty("java.vendor");
+    }
+
+    /**
+     * @return JVM version.
+     */
+    public String getVMVersion() {
+        return System.getProperty("java.version");
+    }
+
     public Map<String,Object> toMap() {
         final Map<String,Object> status = new LinkedHashMap<>();
 
-        // Application
-        Map<String,Object> section = new LinkedHashMap<>();
-        section.put("version", getApplicationVersion());
-        status.put("application", section);
-
-        // DMIC
-        section = new LinkedHashMap<>();
-        section.put("size", getDMICSize());
-        section.put("maxSize", getDMICMaxSize());
-        status.put("delegateMethodInvocationCache", section);
-
-        // Info cache
-        section = new LinkedHashMap<>();
-        section.put("size", getInfoCacheSize());
-        section.put("maxSize", getInfoCacheMaxSize());
-        status.put("infoCache", section);
-
-        // Memory
-        section = new LinkedHashMap<>();
-        section.put("usedHeapBytes", getVMTotalHeap() - getVMFreeHeap());
-        section.put("freeHeapBytes", getVMFreeHeap());
-        section.put("totalHeapBytes", getVMTotalHeap());
-        section.put("maxHeapBytes", getVMMaxHeap());
-        section.put("usedHeapPercent", getVMUsedHeap() / (double) getVMMaxHeap());
-        section.put("uptimeMsec", getVMUptime());
-        status.put("vm", section);
-
+        { // Application
+            var section = new LinkedHashMap<>();
+            section.put("version", getApplicationVersion());
+            status.put("application", section);
+        }
+        { // Info cache
+            var section = new LinkedHashMap<>();
+            section.put("size", getInfoCacheSize());
+            section.put("maxSize", getInfoCacheMaxSize());
+            status.put("infoCache", section);
+        }
+        { // VM
+            var section = new LinkedHashMap<>();
+            section.put("vendor", getVMVendor());
+            section.put("name", getVMName());
+            section.put("version", getVMVersion());
+            section.put("info", getVMInfo());
+            section.put("numProcessors", getNumProcessors());
+            section.put("usedHeapBytes", getVMTotalHeap() - getVMFreeHeap());
+            section.put("freeHeapBytes", getVMFreeHeap());
+            section.put("totalHeapBytes", getVMTotalHeap());
+            section.put("maxHeapBytes", getVMMaxHeap());
+            section.put("usedHeapPercent", getVMUsedHeap() / (double) getVMMaxHeap());
+            section.put("uptimeMsec", getVMUptime());
+            status.put("vm", section);
+        }
         return status;
     }
 

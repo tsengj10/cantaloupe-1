@@ -2,69 +2,63 @@ package edu.illinois.library.cantaloupe.processor;
 
 import edu.illinois.library.cantaloupe.image.Format;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class AutomaticSelectionStrategyTest extends BaseTest {
 
     private AutomaticSelectionStrategy instance;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         instance = new AutomaticSelectionStrategy();
     }
 
     @Test
-    public void getPreferredProcessorsWithJP2() {
-        List<?> expected = Arrays.asList(
+    void getPreferredProcessorsWithJP2() {
+        List<?> expected = List.of(
                 KakaduNativeProcessor.class,
                 OpenJpegProcessor.class,
-                ImageMagickProcessor.class,
-                GraphicsMagickProcessor.class);
-        assertEquals(expected, instance.getPreferredProcessors(Format.JP2));
+                GrokProcessor.class);
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("jp2")));
     }
 
     @Test
-    public void getPreferredProcessorsWithJPG() {
-        List<?> expected = Arrays.asList(
+    void getPreferredProcessorsWithJPG() {
+        List<?> expected = List.of(
                 TurboJpegProcessor.class,
-                Java2dProcessor.class,
-                GraphicsMagickProcessor.class,
-                ImageMagickProcessor.class);
-        assertEquals(expected, instance.getPreferredProcessors(Format.JPG));
+                Java2dProcessor.class);
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("jpg")));
     }
 
     @Test
-    public void getPreferredProcessorsWithPDF() {
-        List<?> expected = Arrays.asList(PdfBoxProcessor.class,
-                GraphicsMagickProcessor.class, ImageMagickProcessor.class);
-        assertEquals(expected, instance.getPreferredProcessors(Format.PDF));
+    void getPreferredProcessorsWithPDF() {
+        List<?> expected = List.of(PdfBoxProcessor.class);
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("pdf")));
     }
 
     @Test
-    public void getPreferredProcessorsWithVideo() {
-        List<?> expected = Arrays.asList(FfmpegProcessor.class);
-        assertEquals(expected, instance.getPreferredProcessors(Format.MPG));
+    void getPreferredProcessorsWithVideo() {
+        List<?> expected = List.of(FfmpegProcessor.class);
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("mpg")));
     }
 
     @Test
-    public void getPreferredProcessorsWithOther() {
-        List<?> expected = Arrays.asList(Java2dProcessor.class,
-                GraphicsMagickProcessor.class, ImageMagickProcessor.class);
-        assertEquals(expected, instance.getPreferredProcessors(Format.BMP));
-        assertEquals(expected, instance.getPreferredProcessors(Format.GIF));
-        assertEquals(expected, instance.getPreferredProcessors(Format.PNG));
-        assertEquals(expected, instance.getPreferredProcessors(Format.TIF));
+    void getPreferredProcessorsWithOther() {
+        List<?> expected = List.of(Java2dProcessor.class);
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("bmp")));
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("gif")));
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("png")));
+        assertEquals(expected, instance.getPreferredProcessors(Format.get("tif")));
     }
 
     @Test
-    public void testToString() {
+    void testToString() {
         assertEquals("AutomaticSelectionStrategy", instance.toString());
     }
 

@@ -1,19 +1,19 @@
 package edu.illinois.library.cantaloupe.cache;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.lambdaworks.redis.MapScanCursor;
-import com.lambdaworks.redis.RedisClient;
-import com.lambdaworks.redis.RedisURI;
-import com.lambdaworks.redis.ScanArgs;
-import com.lambdaworks.redis.api.StatefulRedisConnection;
-import com.lambdaworks.redis.codec.ByteArrayCodec;
-import com.lambdaworks.redis.codec.RedisCodec;
-import com.lambdaworks.redis.codec.Utf8StringCodec;
 import edu.illinois.library.cantaloupe.config.Configuration;
 import edu.illinois.library.cantaloupe.config.Key;
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.image.Info;
 import edu.illinois.library.cantaloupe.operation.OperationList;
+import io.lettuce.core.MapScanCursor;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.ScanArgs;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.codec.ByteArrayCodec;
+import io.lettuce.core.codec.RedisCodec;
+import io.lettuce.core.codec.StringCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,24 +21,24 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 
 /**
- * <p>Cache using Redis via the <a href="http://redis.paluch.biz">Lettuce</a>
+ * <p>Cache using Redis via the <a href="https://lettuce.io">Lettuce</a>
  * client.</p>
  *
  * <p>Content is structured as follows:</p>
  *
- * <pre>{
+ * <code><pre>{
  *     #{@link #IMAGE_HASH_KEY}: {
  *         "operation list string representation": image byte array
  *     },
  *     #{@link #INFO_HASH_KEY}: {
  *         "identifier": "UTF-8 JSON string"
  *     }
- * }</pre>
+ * }</pre></code>
  */
 class RedisCache implements DerivativeCache {
 
@@ -48,8 +48,8 @@ class RedisCache implements DerivativeCache {
      */
     static class CustomRedisCodec implements RedisCodec<String, byte[]> {
 
-        private RedisCodec<String,String> keyDelegate = new Utf8StringCodec();
-        private RedisCodec<byte[],byte[]> valueDelegate = new ByteArrayCodec();
+        private final RedisCodec<String,String> keyDelegate = StringCodec.UTF8;
+        private final RedisCodec<byte[],byte[]> valueDelegate = new ByteArrayCodec();
 
         @Override
         public ByteBuffer encodeKey(String k) {
@@ -79,9 +79,9 @@ class RedisCache implements DerivativeCache {
     private static class RedisInputStream extends InputStream {
 
         private ByteArrayInputStream bufferStream;
-        private StatefulRedisConnection<String, byte[]> connection;
-        private String hashKey;
-        private String valueKey;
+        private final StatefulRedisConnection<String, byte[]> connection;
+        private final String hashKey;
+        private final String valueKey;
 
         RedisInputStream(String hashKey,
                          String valueKey,
@@ -136,12 +136,12 @@ class RedisCache implements DerivativeCache {
     /**
      * Buffers written data and then writes it asynchronously to Redis.
      */
-    private static class RedisOutputStream extends OutputStream {
+    private static class RedisOutputStream extends CompletableOutputStream {
 
-        private ByteArrayOutputStream bufferStream = new ByteArrayOutputStream();
-        private StatefulRedisConnection<String, byte[]> connection;
-        private String hashKey;
-        private String valueKey;
+        private final ByteArrayOutputStream bufferStream = new ByteArrayOutputStream();
+        private final StatefulRedisConnection<String, byte[]> connection;
+        private final String hashKey;
+        private final String valueKey;
 
         RedisOutputStream(String hashKey,
                           String valueKey,
@@ -154,8 +154,10 @@ class RedisCache implements DerivativeCache {
         @Override
         public void close() throws IOException {
             try {
-                connection.async().hset(hashKey, valueKey,
-                        bufferStream.toByteArray());
+                if (isCompletelyWritten()) {
+                    connection.async().hset(hashKey, valueKey,
+                            bufferStream.toByteArray());
+                }
             } finally {
                 super.close();
             }
@@ -218,14 +220,14 @@ class RedisCache implements DerivativeCache {
     }
 
     @Override
-    public Info getImageInfo(Identifier identifier) throws IOException {
+    public Optional<Info> getInfo(Identifier identifier) throws IOException {
         byte[] json = getConnection().sync().hget(INFO_HASH_KEY,
                 infoKey(identifier));
         if (json != null) {
             String jsonStr = new String(json, StandardCharsets.UTF_8);
-            return Info.fromJSON(jsonStr);
+            return Optional.of(Info.fromJSON(jsonStr));
         }
-        return null;
+        return Optional.empty();
     }
 
     @Override
@@ -239,7 +241,8 @@ class RedisCache implements DerivativeCache {
     }
 
     @Override
-    public OutputStream newDerivativeImageOutputStream(OperationList opList) {
+    public CompletableOutputStream
+    newDerivativeImageOutputStream(OperationList opList) {
         return new RedisOutputStream(IMAGE_HASH_KEY, imageKey(opList),
                 getConnection());
     }
@@ -290,15 +293,27 @@ class RedisCache implements DerivativeCache {
     }
 
     @Override
-    public void put(Identifier identifier, Info imageInfo) throws IOException {
-        LOGGER.debug("put(): caching info for {}", identifier);
+    public void put(Identifier identifier, Info info) throws IOException {
+        if (!info.isPersistable()) {
+            LOGGER.debug("put(): info for {} is incomplete; ignoring",
+                    identifier);
+            return;
+        }
         try {
-            getConnection().async().hset(INFO_HASH_KEY, infoKey(identifier),
-                    imageInfo.toJSON().getBytes(StandardCharsets.UTF_8));
+            put(identifier, info.toJSON());
         } catch (JsonProcessingException e) {
             LOGGER.error("put(): {}", e.getMessage());
             throw new IOException(e.getMessage(), e);
         }
+    }
+
+    @Override
+    public void put(Identifier identifier, String info) throws IOException {
+        LOGGER.debug("put(): caching info for {}", identifier);
+        getConnection().async().hset(
+                INFO_HASH_KEY,
+                infoKey(identifier),
+                info.getBytes(StandardCharsets.UTF_8));
     }
 
     @Override

@@ -1,41 +1,37 @@
 package edu.illinois.library.cantaloupe.config;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.*;
 
-public abstract class AbstractFileConfigurationTest extends AbstractConfigurationTest {
+abstract class AbstractFileConfigurationTest extends AbstractConfigurationTest {
 
     @Test
-    public void testGetFile() {
-        try {
-            File directory = new File(".");
-            String cwd = directory.getCanonicalPath();
-            Path testPath = Paths.get(cwd, "src", "test", "java", "edu",
-                    "illinois", "library", "cantaloupe", "test");
+    void testGetFile() throws Exception {
+        File directory = new File(".");
+        String cwd = directory.getCanonicalPath();
+        Path testPath = Paths.get(cwd, "src", "test", "java", "edu",
+                "illinois", "library", "cantaloupe", "test");
 
-            String goodProps = testPath + File.separator + "cantaloupe.properties";
-            System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT, goodProps);
-            assertEquals(Paths.get(cwd, "/src/test/java/edu/illinois/library/cantaloupe/test/cantaloupe.properties"),
-                    ((FileConfiguration) getInstance()).getFile());
-        } catch (IOException e) {
-            fail("Failed to set " + ConfigurationFactory.CONFIG_VM_ARGUMENT);
-        }
+        String goodProps = testPath + File.separator + "cantaloupe.properties";
+        System.setProperty(ConfigurationFactory.CONFIG_VM_ARGUMENT, goodProps);
+        assertEquals(
+                Optional.of(Paths.get(cwd, "/src/test/java/edu/illinois/library/cantaloupe/test/cantaloupe.properties")),
+                getInstance().getFile());
     }
 
     /* toMap() */
 
     @Test
-    public void testToMap() {
+    void testToMap() {
         final FileConfiguration instance = (FileConfiguration) getInstance();
         Map<String,Object> expected      = new LinkedHashMap<>();
         Iterator<String> keys            = instance.getKeys();
@@ -43,7 +39,6 @@ public abstract class AbstractFileConfigurationTest extends AbstractConfiguratio
             String key = keys.next();
             expected.put(key, instance.getProperty(key));
         }
-
         assertEquals(expected, instance.toMap());
     }
 

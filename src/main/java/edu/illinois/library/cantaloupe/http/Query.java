@@ -19,25 +19,25 @@ public final class Query implements Iterable<KeyValuePair> {
 
     public Query() {}
 
-    /**
-     * Copy constructor.
-     */
-    public Query(Query query) {
-        this(query.toString());
-    }
-
     public Query(String query) {
         if (!query.isEmpty()) {
             String[] pairs = query.split("&");
             for (String pair : pairs) {
                 String[] kv = pair.split("=");
                 if (kv.length > 1) {
-                    add(kv[0], kv[1]);
+                    add(Reference.decode(kv[0]), Reference.decode(kv[1]));
                 } else if (kv.length > 0) {
-                    add(kv[0]);
+                    add(Reference.decode(kv[0]));
                 }
             }
         }
+    }
+
+    /**
+     * Copy constructor.
+     */
+    public Query(Query query) {
+        pairs.addAll(query.getAll());
     }
 
     public void add(String name) {
@@ -75,11 +75,12 @@ public final class Query implements Iterable<KeyValuePair> {
     }
 
     public String getFirstValue(String key) {
-        Optional<String> header = pairs.stream().
-                filter(kv -> kv.getKey().equals(key)).
-                map(KeyValuePair::getValue).
-                findFirst();
-        return header.orElse(null);
+        for (KeyValuePair pair : pairs) {
+            if (pair.getKey().equals(key)) {
+                return pair.getValue();
+            }
+        }
+        return null;
     }
 
     public String getFirstValue(String key, String defaultValue) {
@@ -103,6 +104,10 @@ public final class Query implements Iterable<KeyValuePair> {
     @Override
     public Iterator<KeyValuePair> iterator() {
         return pairs.iterator();
+    }
+
+    public void remove(String key) {
+        pairs.removeIf(pair -> pair.getKey().equals(key));
     }
 
     /**

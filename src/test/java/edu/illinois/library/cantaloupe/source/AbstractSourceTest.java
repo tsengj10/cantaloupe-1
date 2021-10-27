@@ -2,14 +2,14 @@ package edu.illinois.library.cantaloupe.source;
 
 import edu.illinois.library.cantaloupe.image.Identifier;
 import edu.illinois.library.cantaloupe.test.BaseTest;
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.output.NullOutputStream;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.NoSuchFileException;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 abstract class AbstractSourceTest extends BaseTest {
 
@@ -19,7 +19,7 @@ abstract class AbstractSourceTest extends BaseTest {
     abstract void useBasicLookupStrategy();
     abstract void useScriptLookupStrategy();
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
         useBasicLookupStrategy();
@@ -28,7 +28,7 @@ abstract class AbstractSourceTest extends BaseTest {
     /* checkAccess() */
 
     @Test
-    public void testCheckAccessUsingBasicLookupStrategyWithPresentReadableImage()
+    void testCheckAccessUsingBasicLookupStrategyWithPresentReadableImage()
             throws Exception {
         try {
             initializeEndpoint();
@@ -39,22 +39,22 @@ abstract class AbstractSourceTest extends BaseTest {
         }
     }
 
-    @Test(expected = NoSuchFileException.class)
-    public void testCheckAccessUsingBasicLookupStrategyWithMissingImage()
+    @Test
+    void testCheckAccessUsingBasicLookupStrategyWithMissingImage()
             throws Exception {
         try {
             initializeEndpoint();
 
             Source instance = newInstance();
             instance.setIdentifier(new Identifier("bogus"));
-            instance.checkAccess();
+            assertThrows(NoSuchFileException.class, instance::checkAccess);
         } finally {
             destroyEndpoint();
         }
     }
 
     @Test
-    public void testCheckAccessInvokedMultipleTimes() throws Exception {
+    void testCheckAccessInvokedMultipleTimes() throws Exception {
         try {
             initializeEndpoint();
 
@@ -67,64 +67,49 @@ abstract class AbstractSourceTest extends BaseTest {
         }
     }
 
-    /* getFormat() */
+    /* getFormatIterator() */
 
     @Test
-    public void testGetFormatInvokedMultipleTimes() throws Exception {
-        try {
-            initializeEndpoint();
-
-            Source instance = newInstance();
-            instance.getFormat();
-            instance.getFormat();
-            instance.getFormat();
-        } finally {
-            destroyEndpoint();
-        }
+    void testGetFormatIteratorConsecutiveInvocationsReturnSameInstance() {
+        Source instance = newInstance();
+        var it = instance.getFormatIterator();
+        assertSame(it, instance.getFormatIterator());
     }
 
     /* newStreamFactory() */
 
     @Test
-    public void testNewStreamFactoryInvokedMultipleTimes() throws Exception {
+    void testNewStreamFactoryInvokedMultipleTimes() throws Exception {
         Source instance = newInstance();
-        if (instance instanceof StreamSource) {
-            try {
-                initializeEndpoint();
-
-                StreamSource sres = (StreamSource) instance;
-                sres.newStreamFactory();
-                sres.newStreamFactory();
-                sres.newStreamFactory();
-            } finally {
-                destroyEndpoint();
-            }
+        try {
+            initializeEndpoint();
+            instance.newStreamFactory();
+            instance.newStreamFactory();
+            instance.newStreamFactory();
+        } finally {
+            destroyEndpoint();
         }
     }
 
     @Test
-    public void testNewStreamFactoryReturnedInstanceIsReusable()
+    void testNewStreamFactoryReturnedInstanceIsReusable()
             throws Exception {
         Source instance = newInstance();
-        if (instance instanceof StreamSource) {
-            try {
-                initializeEndpoint();
+        try {
+            initializeEndpoint();
+            StreamFactory source = instance.newStreamFactory();
 
-                StreamSource sres = (StreamSource) instance;
-                StreamFactory source = sres.newStreamFactory();
-
-                try (InputStream is = source.newInputStream();
-                     OutputStream os = new NullOutputStream()) {
-                    IOUtils.copy(is, os);
-                }
-
-                try (InputStream is = source.newInputStream();
-                     OutputStream os = new NullOutputStream()) {
-                    IOUtils.copy(is, os);
-                }
-            } finally {
-                destroyEndpoint();
+            try (InputStream is = source.newInputStream();
+                 OutputStream os = OutputStream.nullOutputStream()) {
+                is.transferTo(os);
             }
+
+            try (InputStream is = source.newInputStream();
+                 OutputStream os = OutputStream.nullOutputStream()) {
+                is.transferTo(os);
+            }
+        } finally {
+            destroyEndpoint();
         }
     }
 

@@ -10,13 +10,22 @@ import edu.illinois.library.cantaloupe.http.Response;
 import edu.illinois.library.cantaloupe.resource.Route;
 import edu.illinois.library.cantaloupe.status.Health;
 import edu.illinois.library.cantaloupe.status.HealthChecker;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class HealthResourceTest extends AbstractAPIResourceTest {
+
+    @BeforeEach
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
+        HealthChecker.getSourceUsages().clear();
+        HealthChecker.overrideHealth(null);
+    }
 
     @Override
     protected String getEndpointPath() {
@@ -24,7 +33,7 @@ public class HealthResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testGETWithEndpointDisabled() throws Exception {
+    void testGETWithEndpointDisabled() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.API_ENABLED, false);
         try {
@@ -40,7 +49,7 @@ public class HealthResourceTest extends AbstractAPIResourceTest {
      * successfully returned from an image endpoint.
      */
     @Test
-    public void testGETWithNoPriorImageRequest() throws Exception {
+    void testGETWithNoPriorImageRequest() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.API_ENABLED, true);
 
@@ -49,7 +58,7 @@ public class HealthResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testGETWithPriorImageRequest() throws Exception {
+    void testGETWithPriorImageRequest() throws Exception {
         Configuration config = Configuration.getInstance();
         config.setProperty(Key.API_ENABLED, true);
 
@@ -72,40 +81,38 @@ public class HealthResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testGETWithYellowStatus() throws Exception {
+    void testGETWithYellowStatus() throws Exception {
+        var config = Configuration.getInstance();
+        config.setProperty(Key.HEALTH_DEPENDENCY_CHECK, true);
+        config.setProperty(Key.API_ENABLED, true);
+
         Health health = new Health();
         health.setMinColor(Health.Color.YELLOW);
         try {
-            HealthChecker.setOverriddenHealth(health);
-
-            Configuration config = Configuration.getInstance();
-            config.setProperty(Key.API_ENABLED, true);
+            HealthChecker.overrideHealth(health);
 
             client.send();
             fail("Expected HTTP 500");
         } catch (ResourceException e) {
             assertEquals(500, e.getStatusCode());
-        } finally {
-            HealthChecker.setOverriddenHealth(null);
         }
     }
 
     @Test
-    public void testGETWithRedStatus() throws Exception {
+    void testGETWithRedStatus() throws Exception {
+        var config = Configuration.getInstance();
+        config.setProperty(Key.HEALTH_DEPENDENCY_CHECK, true);
+        config.setProperty(Key.API_ENABLED, true);
+
         Health health = new Health();
         health.setMinColor(Health.Color.RED);
         try {
-            HealthChecker.setOverriddenHealth(health);
-
-            Configuration config = Configuration.getInstance();
-            config.setProperty(Key.API_ENABLED, true);
+            HealthChecker.overrideHealth(health);
 
             client.send();
             fail("Expected HTTP 500");
         } catch (ResourceException e) {
             assertEquals(500, e.getStatusCode());
-        } finally {
-            HealthChecker.setOverriddenHealth(null);
         }
     }
 
@@ -126,13 +133,13 @@ public class HealthResourceTest extends AbstractAPIResourceTest {
     }
 
     @Test
-    public void testGETResponseBody() throws Exception {
+    void testGETResponseBody() throws Exception {
         Response response = client.send();
         assertTrue(response.getBodyAsString().contains("\"color\":"));
     }
 
     @Test
-    public void testGETResponseHeaders() throws Exception {
+    void testGETResponseHeaders() throws Exception {
         Response response = client.send();
         Headers headers = response.getHeaders();
         assertEquals(6, headers.size());
@@ -142,8 +149,8 @@ public class HealthResourceTest extends AbstractAPIResourceTest {
         // Content-Length
         assertNotNull(headers.getFirstValue("Content-Length"));
         // Content-Type
-        assertEquals("application/json;charset=UTF-8",
-                headers.getFirstValue("Content-Type"));
+        assertTrue("application/json;charset=UTF-8".equalsIgnoreCase(
+                headers.getFirstValue("Content-Type")));
         // Date
         assertNotNull(headers.getFirstValue("Date"));
         // Server
