@@ -224,9 +224,9 @@ cantaloupe:
   key: cantaloupe
   name: CANTALOUPE
   extensions:
-    - image/cantaloupe
+    - cantaloupe
   mediaTypes:
-    - image/raft
+    - image/cantaloupe
   raster: true
   video: false
   supportsTransparency: false   

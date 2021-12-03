@@ -10,6 +10,7 @@ import edu.illinois.library.cantaloupe.image.Metadata;
 import edu.illinois.library.cantaloupe.image.Rectangle;
 import edu.illinois.library.cantaloupe.image.ScaleConstraint;
 import edu.illinois.library.cantaloupe.operation.Crop;
+import edu.illinois.library.cantaloupe.operation.CropByPercent;
 import edu.illinois.library.cantaloupe.operation.ReductionFactor;
 import edu.illinois.library.cantaloupe.operation.Scale;
 import edu.illinois.library.cantaloupe.source.StreamFactory;
@@ -34,7 +35,7 @@ import javax.imageio.stream.ImageInputStream;
 import org.lsst.fits.imageio.CameraImageReader;
 import org.lsst.fits.imageio.CameraImageReadParam;
 
-final class RAFTImageReader extends AbstractIIOImageReader
+public final class RAFTImageReader extends AbstractIIOImageReader
         implements ImageReader {
 
     private static final Logger LOGGER
@@ -100,6 +101,27 @@ final class RAFTImageReader extends AbstractIIOImageReader
         return 10; // FIXME
     }
 
+    /**
+     * <p>Attempts to read an image as efficiently as possible, exploiting its
+     * tile layout, if possible.</p>
+     *
+     * <p>This implementation is optimized for mono-resolution images.</p>
+     *
+     * <p>After reading, clients should check the reader hints to see whether
+     * the returned image will require cropping.</p>
+     *
+     * @param imageIndex      Image index.
+     * @param crop            May be {@code null}.
+     * @param scale           May be {@code null}.
+     * @param scaleConstraint Scale constraint.
+     * @param reductionFactor The {@link ReductionFactor#factor} property will
+     *                        be modified to reflect the reduction factor of the
+     *                        returned image.
+     * @param hints           Will be populated by information returned from
+     *                        the reader.
+     * @return                Image best matching the given arguments.
+     */
+    
     @Override
     public BufferedImage read(final int imageIndex,
                               final Crop crop,
@@ -112,13 +134,16 @@ final class RAFTImageReader extends AbstractIIOImageReader
         LOGGER.info("RAFT: hints=" + hints);
         LOGGER.info("RAFT: iioReader=" + iioReader);
 
+        // TODO: Review the logic here, the primary goal is just to deal with fetching the full focal-plane
+        // image preview, without exceeding the maximum size of a java 2d image.
         if (scale != null && iioReader != null) {
+            Crop actualCrop = crop == null ? new CropByPercent() : crop;
             final Dimension fullSize = new Dimension(iioReader.getWidth(0), iioReader.getHeight(0));
-            final Rectangle regionRect = crop.getRectangle(fullSize, new ReductionFactor(), scaleConstraint);
+            final Rectangle regionRect = actualCrop.getRectangle(fullSize, new ReductionFactor(), scaleConstraint);
             LOGGER.info("RAFT: regionRect=" + regionRect);
             Dimension resultingSize = scale.getResultingSize(fullSize, reductionFactor, scaleConstraint);
             LOGGER.info("RAFT: resultingSize=" + resultingSize);
-            // TODO: Figure out how to get options map
+            // TODO: Do we need to be able to get option specified in the URL (rather than in the input file?)
             ImageReadParam readParam = getDefaultReadParam(Collections.EMPTY_MAP);
             int subSamplingX = 1;
             int subSamplingY = 1;
@@ -145,11 +170,13 @@ final class RAFTImageReader extends AbstractIIOImageReader
         return iioReader.read(imageIndex, readParam);
     }
 
-    private ImageReadParam getDefaultReadParam(Map<String, Object> opts) {
+    public ImageReadParam getDefaultReadParam(Map<String, Object> opts) {
         CameraImageReadParam readParam = ((CameraImageReader) iioReader).getDefaultReadParam();
         this.options.putAll(opts);
         Object biasCorrection = this.options.get("biasCorrection");
         if (biasCorrection != null) {
+            if ("None".equals(biasCorrection)) biasCorrection = "Simple Overscan Subtraction only";
+            else if ("Simple Overscan Correction".equals(biasCorrection)) biasCorrection = "Simple Overscan Subtraction2";
             readParam.setBiasCorrection(biasCorrection.toString());
         }
         Object scale = this.options.get("scale");
@@ -209,6 +236,10 @@ final class RAFTImageReader extends AbstractIIOImageReader
         super.setSource(inputFile); //To change body of generated methods, choose Tools | Templates.
         LOGGER.info("RAFT: setSourcePath");
         extractOptionsFromFile(inputStream);
+    }
+
+    public CameraImageReader getIioReader() {
+        return (CameraImageReader) iioReader;
     }
 
 }

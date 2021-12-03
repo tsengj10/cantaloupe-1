@@ -64,7 +64,15 @@ public final class Route {
                 edu.illinois.library.cantaloupe.resource.iiif.v2.IdentifierResource.class);
         MAPPINGS.put(Pattern.compile("^" + IIIF_2_PATH + "/([^/]+)/([^/]+)/([^/]+)/([^/]+)/([^/]+)\\.([^/]+)$"),
                 edu.illinois.library.cantaloupe.resource.iiif.v2.ImageResource.class);
-
+        // Mappings added for handling fetchinmg geometry info and for requesting info about pixels
+        // For now we have choosen to make the parent path IIIF_2_PATH for simplicity (although this is probably a questionable decission)
+        MAPPINGS.put(Pattern.compile("^" + IIIF_2_PATH + "/([^/]+)/([^/]+)/pixel\\.json$"),
+                edu.illinois.library.cantaloupe.resource.iiif.v2.CCSResource.class);
+        MAPPINGS.put(Pattern.compile("^" + IIIF_2_PATH + "/([^/]+)/geominfo\\.json$"),
+                edu.illinois.library.cantaloupe.resource.iiif.v2.CCSResource.class);
+        MAPPINGS.put(Pattern.compile("^" + IIIF_2_PATH + "/([^/]+)/geometry\\.json$"),
+                edu.illinois.library.cantaloupe.resource.iiif.v2.CCSResource.class);
+        
         // IIIF Image API v1 routes
         MAPPINGS.put(Pattern.compile("^" + IIIF_1_PATH + "$"),
                 edu.illinois.library.cantaloupe.resource.iiif.v1.LandingResource.class);
