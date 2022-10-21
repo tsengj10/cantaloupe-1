@@ -312,7 +312,7 @@ public class CCSRequestHandler extends AbstractRequestHandler
                     int x = Integer.parseInt(xy[0]);
                     int y = Integer.parseInt(xy[1]);;
                     Segment imageMetaDataForPoint = iioReader.getImageMetaDataForPoint(defaultReadParam, x, y);
-                    int pixel = -1;
+                    Number pixel = -1;
                     if (imageMetaDataForPoint != null) {
                         AffineTransform wcsTranslation = imageMetaDataForPoint.getWCSTranslation(false);
                         AffineTransform inverse = wcsTranslation.createInverse();

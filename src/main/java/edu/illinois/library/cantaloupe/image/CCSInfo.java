@@ -126,9 +126,9 @@ public class CCSInfo {
 
         private final int x;
         private final int y;
-        private final int pixel;
+        private final Number pixel;
 
-        public CCSPixelInfo(List<String> args, String processorName, int x, int y, int pixel) {
+        public CCSPixelInfo(List<String> args, String processorName, int x, int y, Number pixel) {
             super(args, processorName);
             this.x = x;
             this.y = y;
@@ -143,7 +143,7 @@ public class CCSInfo {
             return y;
         }
 
-        public int getPixel() {
+        public Number getPixel() {
             return pixel;
         }
     }

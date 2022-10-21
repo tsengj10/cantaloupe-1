@@ -11,8 +11,8 @@
     <inceptionYear>2015</inceptionYear>
 
     <properties>
-        <maven.compile.source>11</maven.compile.source>
-        <maven.compile.target>11</maven.compile.target>
+        <maven.compile.source>17</maven.compile.source>
+        <maven.compile.target>17</maven.compile.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <aws-sdk.version>2.15.28</aws-sdk.version>
@@ -397,7 +397,7 @@
         <dependency>
             <groupId>org.lsst</groupId>
             <artifactId>ccs.fits.test</artifactId>
-            <version>1.6.0-SNAPSHOT</version>
+            <version>1.7.0-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>mysql</groupId>
