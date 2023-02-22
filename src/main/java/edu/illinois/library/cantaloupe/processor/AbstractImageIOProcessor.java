@@ -21,7 +21,7 @@ import java.util.Set;
  * Abstract class that can be extended by processors that read images using
  * ImageIO.
  */
-abstract class AbstractImageIOProcessor extends AbstractProcessor {
+public abstract class AbstractImageIOProcessor extends AbstractProcessor {
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(AbstractImageIOProcessor.class);
@@ -109,7 +109,7 @@ abstract class AbstractImageIOProcessor extends AbstractProcessor {
      * ({@link #setSourceFile} or {@link #setStreamFactory}) and
      * {@link #setSourceFormat(Format)} must be invoked first.
      */
-    protected ImageReader getReader() throws IOException {
+    public ImageReader getReader() throws IOException {
         if (reader == null) {
             ImageReaderFactory rf = new ImageReaderFactory();
             if (streamFactory != null) {

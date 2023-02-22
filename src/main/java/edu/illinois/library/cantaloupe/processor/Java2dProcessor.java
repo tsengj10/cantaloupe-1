@@ -23,7 +23,7 @@ import java.util.Set;
 /**
  * <p>Processor using the Java 2D and ImageIO libraries.</p>
  */
-class Java2dProcessor extends AbstractImageIOProcessor
+public class Java2dProcessor extends AbstractImageIOProcessor
         implements StreamProcessor, FileProcessor {
 
     private static final Format GIF = Format.get("gif");

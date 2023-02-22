@@ -206,3 +206,28 @@ xpm:
   raster: true
   video: false
   supportsTransparency: true
+  
+# CCS Additions
+raft:
+  key: raft
+  name: RAFT
+  extensions:
+    - raft
+    - fp
+  mediaTypes:
+    - image/raft
+  raster: true
+  video: false
+  supportsTransparency: false  
+  
+cantaloupe:
+  key: cantaloupe
+  name: CANTALOUPE
+  extensions:
+    - cantaloupe
+  mediaTypes:
+    - image/cantaloupe
+  raster: true
+  video: false
+  supportsTransparency: false   
+  

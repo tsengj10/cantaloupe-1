@@ -23,7 +23,8 @@ public final class ImageReaderFactory {
 
     private static final Set<Format> SUPPORTED_FORMATS = Set.of(
             Format.get("bmp"), Format.get("gif"), Format.get("jpg"),
-            Format.get("png"), Format.get("tif"), Format.get("xpm"));
+            Format.get("png"), Format.get("tif"), Format.get("xpm"),
+            Format.get("raft"), Format.get("cantaloupe"));
 
     /**
      * @return Map of available output formats for all known source formats,
@@ -46,6 +47,10 @@ public final class ImageReaderFactory {
             return new TIFFImageReader();
         } else if (Format.get("xpm").equals(format)) {
             return new XPMImageReader();
+        } else if (Format.get("raft").equals(format)) {
+            return new RAFTImageReader();
+        } else if (Format.get("cantaloupe").equals(format)) {
+            return new DelegatingImageReader();
         }
         throw new IllegalArgumentException("Unsupported format: " + format);
     }
