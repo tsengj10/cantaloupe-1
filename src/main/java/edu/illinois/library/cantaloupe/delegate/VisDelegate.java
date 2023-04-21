@@ -18,6 +18,24 @@ import java.util.AbstractMap;
  */
 public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
     
+    private enum VisKey {
+        PREFERRED_FORMAT("jpg");
+        
+        public final String key;
+        
+        VisKey(String key) {
+            this.key = key;
+        }
+        
+        public String key() {
+            return key;
+        }
+        
+        public String toString() {
+            return key();
+        }
+    }
+    
     @Override
     public String serializeMetaIdentifier(Map<String,Object> metaIdentifier) {
         return null;
@@ -33,6 +51,7 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
         var config = Configuration.getInstance();
         Logger.info("Hello world! The identifier is: " + getContext().getIdentifier());
         Logger.info("Input port is " + config.getInt(Key.HTTP_PORT, 80));
+        Logger.info("Test key is " + config.getInt("vis.IntKey", 999));
         return true;
     }
 
@@ -43,15 +62,19 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
 
     @Override
     public Map<String,Object> getExtraIIIF2InformationResponseKeys() {
+        var config = Configuration.getInstance();
+        String fmt = config.getString(VisKey.PREFERRED_FORMAT, "jpg");
         return Map.ofEntries(
-            new AbstractMap.SimpleEntry<>("preferredFormats", List.of("png"))
+            new AbstractMap.SimpleEntry<>("preferredFormats", List.of(fmt))
         );
     }
 
     @Override
     public Map<String,Object> getExtraIIIF3InformationResponseKeys() {
+        var config = Configuration.getInstance();
+        String fmt = config.getString(VisKey.PREFERRED_FORMAT, "jpg");
         return Map.ofEntries(
-            new AbstractMap.SimpleEntry<>("preferredFormats", List.of("png"))
+            new AbstractMap.SimpleEntry<>("preferredFormats", List.of(fmt))
         );
     }
 
