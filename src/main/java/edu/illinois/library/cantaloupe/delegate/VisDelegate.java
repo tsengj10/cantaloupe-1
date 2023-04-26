@@ -19,7 +19,9 @@ import java.util.AbstractMap;
 public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
     
     private enum VisKey {
-        PREFERRED_FORMAT("jpg");
+        PREFERRED_FORMAT("vis.preferredFormat"),
+        CACHE_ROOT("vis.cache.root"),
+        SOURCE_DEFAULT("vis.source.default");
         
         public final String key;
         
@@ -29,11 +31,7 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
         
         public String key() {
             return key;
-        }
-        
-        public String toString() {
-            return key();
-        }
+        }   
     }
     
     @Override
@@ -50,8 +48,7 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
     public Object preAuthorize() {
         var config = Configuration.getInstance();
         Logger.info("Hello world! The identifier is: " + getContext().getIdentifier());
-        Logger.info("Input port is " + config.getInt(Key.HTTP_PORT, 80));
-        Logger.info("Test key is " + config.getInt("vis.IntKey", 999));
+        Logger.info("Test key is " + config.getString(VisKey.PREFERRED_FORMAT.key(), "error"));
         return true;
     }
 
@@ -63,7 +60,7 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
     @Override
     public Map<String,Object> getExtraIIIF2InformationResponseKeys() {
         var config = Configuration.getInstance();
-        String fmt = config.getString(VisKey.PREFERRED_FORMAT, "jpg");
+        String fmt = config.getString(VisKey.PREFERRED_FORMAT.key(), "png");
         return Map.ofEntries(
             new AbstractMap.SimpleEntry<>("preferredFormats", List.of(fmt))
         );
@@ -72,7 +69,7 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
     @Override
     public Map<String,Object> getExtraIIIF3InformationResponseKeys() {
         var config = Configuration.getInstance();
-        String fmt = config.getString(VisKey.PREFERRED_FORMAT, "jpg");
+        String fmt = config.getString(VisKey.PREFERRED_FORMAT.key(), "png");
         return Map.ofEntries(
             new AbstractMap.SimpleEntry<>("preferredFormats", List.of(fmt))
         );
@@ -90,6 +87,9 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
 
     @Override
     public String getFilesystemSourcePathname() {
+        var config = Configuration.getInstance();
+        String root = config.getString(VisKey.CACHE_ROOT.key(), "");
+        // how do I get the identifier and key-value pairs?
         return null;
     }
 
