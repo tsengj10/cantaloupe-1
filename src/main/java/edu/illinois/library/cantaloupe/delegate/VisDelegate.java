@@ -17,6 +17,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.AbstractMap;
 import java.util.HashMap;
+import java.util.Properties;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 
 /**
  *
@@ -31,6 +37,9 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
         SOURCE_DEFAULT("vis.source.default"),
         SUFFIX_TYPE(".type"),
         SUFFIX_ROOT(".root"),
+        SUFFIX_URL(".url"),
+        SUFFIX_USER(".user"),
+        SUFFIX_PASSWORD(".password"),
         SUFFIX_USE_DAYOBS(".useDayObs"),
         SUFFIX_USE_IMAGEID(".useImageId");
         
@@ -180,39 +189,75 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
             if (config.getBoolean(sourceBase + VisKey.SUFFIX_USE_IMAGEID.key(), true)) {
                 path.append(imageId).append("/");
             }
-            // check the directory exists
-            String dataPath = path.toString();
-            File d = new File(dataPath);
-            if (!d.isDirectory()) {
-                Logger.error("Directory " + path.toString() + " does not exist");
-                return null;
-            }
-
-            // new file list            
-            FilenameFilter filter = selectAll ? new AllFilter() : new SelectFilter(selector);
-            String[] list = d.list(filter);
-            if (list.length == 0) {
-                Logger.error("No files satisfy pattern " + filter.toString());
-                return null;
-            }
-            try {
-                BufferedWriter bw = new BufferedWriter(new FileWriter(cacheFilename));
-                for (String opt : options) bw.write("#" + opt + "\n");
-                for (String s : list) bw.write(dataPath + s + "\n");
-                bw.close();
-            } catch (IOException io) {
-                Logger.error("Unable to write file list: " + io.toString());                
-            }
-            
-            // return cached file list
-            return cacheFilename;
             
         } else if (sourceType.equals("database")) {
-            Logger.error("use database source - not yet implemented");
+            
+            String sourceUrl = config.getString(sourceBase + VisKey.SUFFIX_URL.key(), "");
+            Properties connectionProps = new Properties();
+            connectionProps.put("user", config.getString(sourceBase + VisKey.SUFFIX_USER.key(), ""));
+            connectionProps.put("password", config.getString(sourceBase + VisKey.SUFFIX_PASSWORD.key(), ""));
+            connectionProps.put("serverTimezone", "UTC");
+            connectionProps.put("autoReconnect", "true");
+            
+            String[] tokens = options[0].split("_");
+            String query = "select fileLocation from ccs_image where telcode=" + tokens[0] +
+                           " and controller=" + tokens[1] +
+                           " and dayobs=" + tokens[2] +
+                           " and seqnum=" + tokens[3];
+            Logger.info("sourceUrl = " + sourceUrl);
+            Logger.info("database query: " + query);
+            try (Connection conn = DriverManager.getConnection(sourceUrl, connectionProps)) {
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(query);
+                rs.next(); // expect only one result
+                String folder = rs.getString("fileLocation");
+                Logger.info("folder = " + folder);
+                path.append(folder);
+            } catch (SQLException e) {
+                Logger.error("Error reading database: " + e.toString());
+                for (Throwable t: e) {
+                    if (t instanceof SQLException) {
+                        Logger.error("SQLState = " + ((SQLException)t).getSQLState());
+                        Logger.error("Error code = " + ((SQLException)t).getErrorCode());
+                        Logger.error("Message = " + t.getMessage());
+                        Throwable c = e.getCause();
+                        while (c != null) {
+                            Logger.error("Cause: " + c);
+                            c = c.getCause();
+                        }
+                    }
+                }
+                return null;
+            }
+        }
+
+        // check the directory exists
+        String dataPath = path.toString();
+        File d = new File(dataPath);
+        if (!d.isDirectory()) {
+            Logger.error("Directory " + path.toString() + " does not exist");
             return null;
         }
 
-        return null;
+        // new file list            
+        FilenameFilter filter = selectAll ? new AllFilter() : new SelectFilter(selector);
+        String[] list = d.list(filter);
+        if (list.length == 0) {
+            Logger.error("No files satisfy pattern " + filter.toString());
+            return null;
+        }
+        try {
+            BufferedWriter bw = new BufferedWriter(new FileWriter(cacheFilename));
+            for (String opt : options) bw.write("#" + opt + "\n");
+            for (String s : list) bw.write(dataPath + s + "\n");
+            bw.close();
+        } catch (IOException io) {
+            Logger.error("Unable to write file list: " + io.toString());                
+        }
+            
+        // return cached file list
+        return cacheFilename;
+
     }
 
     @Override
