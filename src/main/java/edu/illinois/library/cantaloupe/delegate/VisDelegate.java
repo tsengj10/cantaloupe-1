@@ -200,16 +200,19 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
             connectionProps.put("autoReconnect", "true");
             
             String[] tokens = options[0].split("_");
-            String query = "select fileLocation from ccs_image where telcode=" + tokens[0] +
-                           " and controller=" + tokens[1] +
-                           " and dayobs=" + tokens[2] +
-                           " and seqnum=" + tokens[3];
+            String query = "select fileLocation from ccs_image where telcode=\'" + tokens[0] +
+                           "\' and controller=\'" + tokens[1] +
+                           "\' and dayobs=\'" + tokens[2] +
+                           "\' and seqnum=\'" + tokens[3] + "\'";
             Logger.info("sourceUrl = " + sourceUrl);
             Logger.info("database query: " + query);
             try (Connection conn = DriverManager.getConnection(sourceUrl, connectionProps)) {
                 Statement stmt = conn.createStatement();
                 ResultSet rs = stmt.executeQuery(query);
-                rs.next(); // expect only one result
+                if (!rs.next()) { // expect only one result
+                    Logger.error("No image found in database");
+                    return null;
+                }
                 String folder = rs.getString("fileLocation");
                 Logger.info("folder = " + folder);
                 path.append(folder);
