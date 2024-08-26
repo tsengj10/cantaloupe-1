@@ -158,10 +158,11 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
         String selector = sbSelector.toString();
         boolean selectAll = selector.isEmpty();
 
-        // cache file = root + imageId + full selector
+        // cache file = root + imageId + full selector + colorMap
         StringBuilder cacheBase = new StringBuilder(config.getString(VisKey.CACHE_ROOT.key(), ""));
         cacheBase.append(imageId);
         if (!selector.isEmpty()) cacheBase.append("_").append(selector);
+        if (map.containsKey("colorMap")) cacheBase.append("_").append(map.get("colorMap"));
         
         // if (tokens.length <= 4) cachePath.append("_all"); // redundant?
         // look for cached file list
@@ -251,7 +252,7 @@ public class VisDelegate extends AbstractJavaDelegate implements JavaDelegate {
         }
         try {
             BufferedWriter bw = new BufferedWriter(new FileWriter(cacheFilename));
-            for (String opt : options) bw.write("#" + opt + "\n");
+            for (int i = 1; i < options.length; ++i) bw.write("#" + options[i] + "\n");
             for (String s : list) bw.write(dataPath + s + "\n");
             bw.close();
         } catch (IOException io) {
